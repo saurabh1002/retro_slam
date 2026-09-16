@@ -34,4 +34,3 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/find_dependencies.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerOptions.cmake)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/retro_slam)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/metrics)

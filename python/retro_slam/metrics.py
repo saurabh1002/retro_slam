@@ -20,20 +20,50 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+import copy
 from typing import Tuple
 
 import numpy as np
 
-from retro_slam.pybind import retro_slam_pybind
+from evo.core import metrics
+from evo.core.trajectory import PosePath3D
+from evo.core.units import Unit
 
+from evo.core.filters import FilterException
 
 def sequence_error(gt_poses: np.ndarray, results_poses: np.ndarray) -> Tuple[float, float]:
+    
     """Spits the sequence error for a given trajectory in camera coordinate frames."""
-    return retro_slam_pybind._kitti_seq_error(gt_poses, results_poses)
+    traj_ref = PosePath3D(poses_se3=gt_poses)
+    traj_est = PosePath3D(poses_se3=results_poses)
+    traj_est_aligned = copy.deepcopy(traj_est)
+    traj_est_aligned.align(traj_ref, correct_scale=False, correct_only_scale=False)
 
+    # Compute APE
+    ape_metric = metrics.APE(metrics.PoseRelation.translation_part)
+    ape_metric.process_data((traj_ref, traj_est_aligned))
+    ape_rmse = ape_metric.get_statistic(metrics.StatisticsType.rmse)
 
-def absolute_trajectory_error(
-    gt_poses: np.ndarray, results_poses: np.ndarray
-) -> Tuple[float, float]:
-    """Spits the sequence error for a given trajectory in camera coordinate frames."""
-    return retro_slam_pybind._absolute_trajectory_error(gt_poses, results_poses)
+    deltas = [100, 200, 300, 400, 500, 600, 700, 800]  # Deltas as class attribute
+    rpe_means = []
+
+    for delta in deltas:
+        # Calculate RPE
+        rpe_metric = metrics.RPE(
+            metrics.PoseRelation.point_distance_error_ratio,
+            delta=delta,
+            delta_unit=Unit.meters,
+            pairs_from_reference=False,
+        )
+        try:
+            rpe_metric.process_data((traj_ref, traj_est_aligned))
+        except FilterException:
+            continue
+
+        # Collect statistics for this delta
+        rpe_stats = rpe_metric.get_all_statistics()
+        rpe_means.append(rpe_stats["mean"])
+
+    # Calculate overall statistics across all deltas
+    rpe = np.mean(np.array(rpe_means)) if len(rpe_means) > 0 else "-"
+    return ape_rmse, rpe

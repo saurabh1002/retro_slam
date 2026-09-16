@@ -31,7 +31,7 @@ import numpy as np
 from pyquaternion import Quaternion
 
 from retro_slam.tools.pipeline_results import PipelineResults
-from retro_slam.metrics import absolute_trajectory_error, sequence_error
+from retro_slam.metrics import sequence_error
 from retro_slam.config import load_config, write_config
 from retro_slam.slam import RetroSLAM
 
@@ -179,12 +179,9 @@ class SlamPipeline:
     def _run_evaluation(self):
         # Run estimation metrics evaluation, only when GT data was provided
         if self.has_gt:
-            avg_tra, avg_rot = sequence_error(self.gt_poses, self.poses)
-            ate_rot, ate_trans = absolute_trajectory_error(self.gt_poses, self.poses)
-            self.results.append(desc="Average Translation Error", units="%", value=avg_tra)
-            self.results.append(desc="Average Rotational Error", units="deg/m", value=avg_rot)
-            self.results.append(desc="Absolute Trajectory Error (ATE)", units="m", value=ate_trans)
-            self.results.append(desc="Absolute Rotational Error (ARE)", units="rad", value=ate_rot)
+            ate_trans, rpe_trans = sequence_error(self.gt_poses, self.poses)
+            self.results.append(desc="RPE (translation)", units="%", value=rpe_trans)
+            self.results.append(desc="ATE (translation)", units="m", value=ate_trans)
 
         # Run timing metrics evaluation, always
         fps = self._get_fps()

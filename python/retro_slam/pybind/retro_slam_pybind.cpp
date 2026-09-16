@@ -32,7 +32,6 @@
 #include "kiss_icp/pipeline/KissICP.hpp"
 #include "retro_slam/RetroSlamConfig.h"
 #include "retro_slam/retro_slam.hpp"
-#include "metrics/Metrics.hpp"
 #include "stl_vector_eigen.h"
 
 namespace py = pybind11;
@@ -129,8 +128,6 @@ PYBIND11_MODULE(retro_slam_pybind, m) {
     auto vector3dvector = pybind_eigen_vector_of_vector<Eigen::Vector3d>(
         m, "_Vector3dVector", "std::vector<Eigen::Vector3d>",
         py::py_array_to_vectors<Eigen::Vector3d>);
-    auto matrix4dvector = pybind_eigen_vector_of_matrix<Eigen::Matrix4d>(
-        m, "_Matrix4dVector", "std::vector<Eigen::Matrix4d>");
     py::bind_vector<std::vector<Closures>>(m, "ClosuresVector");
 
     py::class_<Closures>(m, "Closures")
@@ -160,8 +157,4 @@ PYBIND11_MODULE(retro_slam_pybind, m) {
         .def("_keyposes", &RetroSLAM::Keyposes)
         .def("_write_pose_graph", &RetroSLAM::WritePoseGraph, "filename"_a)
         .def_readonly("loop_closures_", &RetroSLAM::loop_closures);
-    
-    m.def("_kitti_seq_error", &metrics::SeqError, "gt_poses"_a, "results_poses"_a);
-    m.def("_absolute_trajectory_error", &metrics::AbsoluteTrajectoryError, "gt_poses"_a,
-          "results_poses"_a);
 }

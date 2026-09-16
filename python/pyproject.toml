@@ -34,6 +34,7 @@ dependencies = [
     "pyyaml~=6.0",
     "pydantic>=2",
     "pydantic-settings",
+    "evo",
 ]
 
 [project.optional-dependencies]

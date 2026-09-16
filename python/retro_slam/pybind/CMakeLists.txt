@@ -21,6 +21,6 @@
 # SOFTWARE.
 cmake_minimum_required(VERSION 3.16...3.26)
 pybind11_add_module(retro_slam_pybind MODULE retro_slam_pybind.cpp)
-target_link_libraries(retro_slam_pybind PRIVATE retro_slam_core slam_metrics)
+target_link_libraries(retro_slam_pybind PRIVATE retro_slam_core)
 target_compile_features(retro_slam_pybind PRIVATE cxx_std_20)
 install(TARGETS retro_slam_pybind DESTINATION .)
