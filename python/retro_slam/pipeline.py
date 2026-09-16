@@ -19,21 +19,21 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-import os
-import time
 import contextlib
 import datetime
+import os
+import time
 from pathlib import Path
 from typing import Optional
 
-from tqdm import trange
 import numpy as np
 from pyquaternion import Quaternion
+from tqdm import trange
 
-from retro_slam.tools.pipeline_results import PipelineResults
-from retro_slam.metrics import sequence_error
 from retro_slam.config import load_config, write_config
+from retro_slam.metrics import sequence_error
 from retro_slam.slam import RetroSLAM
+from retro_slam.tools.pipeline_results import PipelineResults
 
 
 class SlamPipeline:

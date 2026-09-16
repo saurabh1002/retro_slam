@@ -31,7 +31,6 @@ from kiss_icp.config.config import (
     MappingConfig,
     RegistrationConfig,
 )
-
 from map_closures.config.config import MapClosuresConfig
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict

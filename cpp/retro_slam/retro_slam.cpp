@@ -114,7 +114,8 @@ RetroSLAM::RetroSLAM(const RetroSlamConfig &config)
 
 void RetroSLAM::ProcessScan(const Vector3dVector &scan_points,
                             const std::vector<double> &scan_timestamps) {
-    const auto& [deskewed_frame, _] = odometry_pipeline_.RegisterFrame(scan_points, scan_timestamps);
+    const auto &[deskewed_frame, _] =
+        odometry_pipeline_.RegisterFrame(scan_points, scan_timestamps);
     const Eigen::Matrix6d &hessian = odometry_pipeline_.hessian();
 
     const Sophus::SE3d scan_to_odom_pose = odometry_pipeline_.pose();

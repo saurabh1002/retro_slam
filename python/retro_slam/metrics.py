@@ -24,15 +24,13 @@ import copy
 from typing import Tuple
 
 import numpy as np
-
 from evo.core import metrics
+from evo.core.filters import FilterException
 from evo.core.trajectory import PosePath3D
 from evo.core.units import Unit
 
-from evo.core.filters import FilterException
 
 def sequence_error(gt_poses: np.ndarray, results_poses: np.ndarray) -> Tuple[float, float]:
-    
     """Spits the sequence error for a given trajectory in camera coordinate frames."""
     traj_ref = PosePath3D(poses_se3=gt_poses)
     traj_est = PosePath3D(poses_se3=results_poses)

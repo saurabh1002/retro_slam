@@ -19,10 +19,11 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-from pathlib import Path
-from typing import Optional
 import glob
 import os
+from pathlib import Path
+from typing import Optional
+
 import typer
 
 from retro_slam.datasets import available_dataloaders, sequence_dataloaders
