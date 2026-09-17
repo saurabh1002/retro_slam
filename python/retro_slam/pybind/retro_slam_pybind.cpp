@@ -131,7 +131,7 @@ PYBIND11_MODULE(retro_slam_pybind, m) {
     py::bind_vector<std::vector<Closures>>(m, "ClosuresVector");
 
     py::class_<Closures>(m, "Closures")
-        .def(py::init<>())
+        .def(py::init<int, int>(), "ref_scan_id"_a, "query_scan_id"_a)
         .def_readonly("ref_scan_id", &Closures::ref_scan_id)
         .def_readonly("query_scan_id", &Closures::query_scan_id)
         .def("__iter__",
