@@ -41,6 +41,17 @@ struct RegistrationCandidate {
     int src_scan_id;
     int tgt_scan_id;
     Sophus::SE3d initial_guess;
+
+    RegistrationCandidate(const int src_id,
+                          const int tgt_id,
+                          const int src_scan_id,
+                          const int tgt_scan_id,
+                          const Sophus::SE3d &initial_guess)
+        : src_id(src_id),
+          tgt_id(tgt_id),
+          src_scan_id(src_scan_id),
+          tgt_scan_id(tgt_scan_id),
+          initial_guess(initial_guess) {}
 };
 
 struct RegistrationResult {
@@ -52,6 +63,21 @@ struct RegistrationResult {
     double fitness_score;
     Sophus::SE3d pose;
     Eigen::Matrix6d hessian;
+
+    RegistrationResult(const int src_id,
+                       const int tgt_id,
+                       const int src_scan_id,
+                       const int tgt_scan_id,
+                       const double fitness_score,
+                       const Sophus::SE3d &pose,
+                       const Eigen::Matrix6d &hessian)
+        : src_id(src_id),
+          tgt_id(tgt_id),
+          src_scan_id(src_scan_id),
+          tgt_scan_id(tgt_scan_id),
+          fitness_score(fitness_score),
+          pose(pose),
+          hessian(hessian) {}
 };
 }  // namespace
 
@@ -70,6 +96,7 @@ struct SlamState {
 struct Closures {
     int ref_scan_id;
     int query_scan_id;
+    Closures(const int ref_id, const int query_id) : ref_scan_id(ref_id), query_scan_id(query_id) {}
 };
 
 struct SubmapData {
