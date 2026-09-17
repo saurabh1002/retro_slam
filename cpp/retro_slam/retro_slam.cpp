@@ -393,7 +393,7 @@ void RetroSLAM::OptimizePoseGraph() {
 }
 
 void RetroSLAM::Exit() {
-    if (submap_graph_.CurrentSubmap().traj.size() > 1) {
+    if (local_trajectory_.size() > 1) {
         FinalizeSubmap({local_trajectory_, hessians_, submap_voxel_grid_.Pointcloud()});
     }
     if (submap_ids_in_local_map_.size() > 0) {
