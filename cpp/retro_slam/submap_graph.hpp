@@ -34,7 +34,7 @@ constexpr double kernel_scale_factor = 3.0;
 constexpr double voxel_map_max_range = 100.0;
 
 constexpr double voxel_size = 0.5;
-constexpr double icp_threshold = std::sqrt(kernel_scale_factor) * voxel_size;
+const double icp_threshold = std::sqrt(kernel_scale_factor) * voxel_size;
 }  // namespace
 
 namespace Eigen {
