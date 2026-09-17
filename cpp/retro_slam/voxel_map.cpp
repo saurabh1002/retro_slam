@@ -26,7 +26,6 @@
 #include <Eigen/Eigenvalues>
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 #include <numeric>
 #include <sophus/se3.hpp>
 #include <tuple>
@@ -45,7 +44,9 @@ inline Eigen::Vector3d ToWorldCoordinates(const Voxel &voxel, const double voxel
                            static_cast<double>(voxel.z()) * voxel_size) +
            Eigen::Vector3d::Constant(voxel_size * 0.5);
 }
-static constexpr unsigned int min_points_for_covariance_computation = 10;
+
+constexpr unsigned int min_points_for_covariance_computation = 10;
+const double sqrt_3 = std::sqrt(3.0);
 
 std::tuple<Eigen::Vector3d, Eigen::Vector3d> ComputeMeanAndNormal(
     const retro_slam::VoxelBlock &coordinates) {
@@ -94,7 +95,7 @@ Vector3dVector VoxelMap::Pointcloud() const {
 
 Vector3dVector VoxelMap::PointsWithinRadiusFromLocation(const Eigen::Vector3d &location,
                                                         const double radius) const {
-    const double half_diagonal = 0.5 * std::numbers::sqrt3_v<double> * voxel_size_;
+    const double half_diagonal = 0.5 * sqrt_3 * voxel_size_;
     const auto max_distance2 = (radius + half_diagonal) * (radius + half_diagonal);
     Vector3dVector nearby_points;
     nearby_points.reserve(num_points_in_map);

@@ -22,13 +22,13 @@
 cmake_minimum_required(VERSION 3.16...3.26)
 project(retro_slam VERSION 0.0.1 LANGUAGES CXX)
 
-option(USE_SYSTEM_EIGEN3 "Use system pre-installed Eigen" ON)
-option(USE_SYSTEM_SOPHUS "Use system pre-installed Sophus" ON)
-option(USE_SYSTEM_G2O "Use a pre-installed version of g2o" OFF)
-
 set(CMAKE_BUILD_TYPE Release)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+option(USE_SYSTEM_EIGEN3 "Use system pre-installed Eigen" ON)
+option(USE_SYSTEM_SOPHUS "Use system pre-installed Sophus" ON)
+option(USE_SYSTEM_G2O "Use a pre-installed version of g2o" ON)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/find_dependencies.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerOptions.cmake)
