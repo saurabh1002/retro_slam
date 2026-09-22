@@ -25,7 +25,6 @@
 #include <Eigen/Core>
 #include <array>
 #include <cstdint>
-#include <sophus/se3.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -63,7 +62,7 @@ struct VoxelMap {
     }
     bool Empty() const { return map_.empty(); }
 
-    void IntegrateFrame(const Vector3dVector &points, const Sophus::SE3d &pose);
+    void IntegrateFrame(const Vector3dVector &points, const Eigen::Matrix4d &pose);
     void AddPoints(const Vector3dVector &points);
 
     Vector3dVector Pointcloud() const;

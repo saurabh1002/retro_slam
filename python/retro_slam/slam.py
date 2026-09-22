@@ -31,7 +31,10 @@ class RetroSLAM:
         self.retro_slam = retro_slam_pybind._RetroSLAM(self.config.model_dump())
 
     def process_scan(self, frame: np.ndarray, timestamps: np.ndarray):
-        self.retro_slam._process_scan(retro_slam_pybind._Vector3dVector(frame), timestamps.ravel())
+        scan_to_odom_pose = self.retro_slam._process_scan(
+            retro_slam_pybind._Vector3dVector(frame), timestamps.ravel()
+        )
+        return scan_to_odom_pose
 
     def write_pose_graph(self, filename: str):
         self.retro_slam._write_pose_graph(filename)
@@ -50,3 +53,30 @@ class RetroSLAM:
     @property
     def loop_closures(self):
         return np.asarray(self.retro_slam.loop_closures_)
+
+    @property
+    def latest_scan(self):
+        return np.asarray(self.retro_slam._latest_scan_points())
+
+    @property
+    def latest_scan_pose(self):
+        return np.asarray(self.retro_slam._latest_scan_pose())
+
+    @property
+    def visualization_state(self):
+        (
+            global_trajectory,
+            local_trajectory,
+            keyposes,
+            latest_scan,
+            latest_pose,
+            loop_closures,
+        ) = self.retro_slam._visualization_state()
+        return {
+            "global_trajectory": np.asarray(global_trajectory),
+            "local_trajectory": np.asarray(local_trajectory),
+            "keyposes": np.asarray(keyposes),
+            "latest_scan": np.asarray(latest_scan),
+            "latest_scan_pose": np.asarray(latest_pose),
+            "loop_closures": loop_closures,
+        }

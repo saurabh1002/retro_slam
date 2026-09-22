@@ -36,6 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 all = [
+    "rerun-sdk>=0.15.0,<0.16",
     "rosbags>=0.10,<0.12",
     "open3d>=0.16",
     "polyscope>=2.4.0",

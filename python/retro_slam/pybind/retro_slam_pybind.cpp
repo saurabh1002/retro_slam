@@ -155,6 +155,19 @@ PYBIND11_MODULE(retro_slam_pybind, m) {
         .def("_exit", &RetroSLAM::Exit)
         .def("_poses", &RetroSLAM::Poses)
         .def("_keyposes", &RetroSLAM::Keyposes)
+        .def("_submaps", &RetroSLAM::Submaps)
+        .def("_visualization_state",
+             [](const RetroSLAM &slam) {
+                 const auto state = slam.LatestVisualizationState();
+                 return py::make_tuple(
+                     py::cast(state.global_trajectory), py::cast(state.local_trajectory),
+                     py::cast(state.keyposes), py::cast(state.latest_scan_points),
+                     py::cast(state.latest_scan_pose), py::cast(state.loop_closures));
+             })
+        .def("_latest_scan_points",
+             [](const RetroSLAM &slam) { return py::cast(slam.LatestScanPoints()); })
+        .def("_latest_scan_pose",
+             [](const RetroSLAM &slam) { return py::cast(slam.LatestScanPose()); })
         .def("_write_pose_graph", &RetroSLAM::WritePoseGraph, "filename"_a)
         .def_readonly("loop_closures_", &RetroSLAM::loop_closures);
 }

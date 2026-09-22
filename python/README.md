@@ -1,96 +1,143 @@
-<div align="center">
-    <h1>Retro-SLAM</h1>
-    <a href="https://github.com/PRBonn/retro-slam/releases"><img src="https://img.shields.io/github/v/release/PRBonn/retro-slam?label=version" /></a>
-    <a href="https://github.com/PRBonn/retro-slam/blob/main/LICENSE"><img src="https://img.shields.io/github/license/PRBonn/retro-slam" /></a>
-    <a href="https://github.com/PRBonn/retro-slam/blob/main/"><img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" /></a>
-    <a href="https://github.com/PRBonn/retro-slam/blob/main/"><img src="https://img.shields.io/badge/mac%20os-000000?&logo=apple&logoColor=white" /></a>
-    <br />
-    <br />
-    <a href="https://github.com/PRBonn/retro-slam/blob/main/README.md#Install">Install</a>
-    <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-    <a href="https://www.ipb.uni-bonn.de/wp-content/papercite-data/pdf/gupta2026arxiv.pdf">Paper</a>
-    <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-    <a href=https://github.com/PRBonn/retro-slam/issues>Contact Us</a>
-  <br />
-  <br />
+# RetroSLAM Python Package
 
-[Retro-SLAM](https://arxiv.org/pdf/2607.13516): Improving Map Consistency in Graph-Based LiDAR SLAM Through Information-Aware Odometry and Retroactive Loop Closure
+Python bindings and utilities for the RetroSLAM SLAM system.
 
-</div>
+## Overview
 
-<hr />
+This package provides:
+- Python bindings to the C++ RetroSLAM core
+- Dataset loaders for various formats (KITTI, Ouster, ROS bags, etc.)
+- Pipeline orchestration
+- **Rerun-based 3D visualization** (NEW!)
 
-## Install
+## Quick Start
 
-```
-pip install retro-slam
+### Installation
+
+```bash
+pip install -e .
 ```
 
-## Running the system
-Next, follow the instructions on how to run the system by typing:
-```
-retro_slam_pipeline --help
-```
+Or using the Makefile:
 
-This should print the following help message:
-
-![help](https://github.com/user-attachments/assets/5a6fe624-2aaf-466f-8a18-51039b794000)
-
-### Config
-You can generate a default `config.yaml` by typing:
-
-```
-retro_slam_dump_config
+```bash
+make build-python
 ```
 
-which will generate a `retro_slam.yaml` file. Now, you can modify the parameters and pass the file to the `--config` option when running the `retro_slam_pipeline`.
+### Basic Usage
 
-Suggestion for indoor applications:
-1. Reduce the `odometry.preprocessing.max_range` to 50.0, this will automatically reduce the `voxel_size` to 0.5.
-2. Reduce the `local_mapper.splitting_distance` to a suitable distance based on the scale of the indoor environment.
+```python
+from retro_slam import SlamPipeline
+from retro_slam.datasets.ouster import OusterDataset
 
-### Install Python API (developer mode)
-For development purposes:
+# Load dataset
+dataset = OusterDataset("data/your_sequence", data_dir="path/to/data")
 
-```
-sudo apt install git python3-pip libeigen3-dev libsuitesparse-dev
-python3 -m pip install --upgrade pip
-git clone https://github.com/PRBonn/retro-slam.git
-cd retro-slam
-make editable
-```
+# Create and run pipeline
+pipeline = SlamPipeline(
+    dataset=dataset,
+    config_file="config.yaml",
+)
 
-### Paper Results
-As we decided to continue developing **Retro-SLAM** beyond the scope of the IROS paper, we created a ``git tag`` so that researchers can consistently reproduce the results presented in the publication. To checkout at this tag, you can run the following:
-```sh
-git checkout RAL
-```
-Our development aims to surpass the performance of **Retro-SLAM** beyond the original results presented in the paper.
-
-## Citation
-If you use this library for any academic work, please cite our original paper:
-```bib
-@article{gupta2026arxiv,
-  author   = {S. Gupta and N. Trekel and L.Wiesmann and C. Stachniss},
-  title    = {{Improving Map Consistency in Graph-Based LiDAR SLAM Through Information-Aware Odometry and Retroactive Loop Closure}},
-  journal  = {arXiv preprint},
-  year     = 2026,
-  volume   = {arXiv:2607.13516},
-  url      = {https://arxiv.org/pdf/2607.13516},
-}
+results = pipeline.run()
 ```
 
-## Acknowledgements
-This project builds on top of [KISS-SLAM](https://github.com/PRBonn/kiss-slam).
+## Visualizer (NEW!)
 
-## Contributing
+RetroSLAM now includes real-time 3D visualization using [Rerun](https://rerun.io/).
 
-We envision this as a community-driven project. We love to see how the project is growing, thanks to the contributions from the community. We would love to see your face in the list below; open a Pull Request!
+### Installation
 
-<a href="https://github.com/PRBonn/retro-slam/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=PRBonn/retro-slam" />
-</a>
+```bash
+pip install 'rerun-sdk[open3d]'
+```
 
-## Contact Us
-For questions or feedback:
-- GitHub Issues: https://github.com/PRBonn/retro-slam/issues
+### Usage
+
+```python
+from retro_slam.visualizers.rerun_visualizer import RetroSLAMVisualizer
+
+# Create visualizer
+visualizer = RetroSLAMVisualizer(app_name="RetroSLAM")
+
+try:
+    # Visualize during processing
+    for scan_idx in range(n_scans):
+        scan, timestamps = dataset[scan_idx]
+
+        # Process...
+
+        # Visualize
+        visualizer.visualize_scan(
+            point_cloud=scan,
+            pose=pose_matrix,
+            timestamp=timestamps[0],
+            frame_id=f"frame_{scan_idx}",
+        )
+
+    # Show results
+    visualizer.visualize_trajectory(poses=poses, timestamps=timestamps)
+    visualizer.visualize_metrics(ate=0.15, rpe=2.5, fps=30)
+
+finally:
+    visualizer.finish()
+```
+
+See the `visualizers/` directory for complete documentation and examples.
+
+## Directory Structure
+
+```
+python/
+├── retro_slam/              # Main package
+│   ├── config/             # Configuration
+│   ├── datasets/           # Dataset loaders
+│   ├── pybind/             # C++ bindings
+│   └── tools/              # Utilities
+├── visualizers/            # Rerun visualization (NEW!)
+│   ├── rerun_visualizer.py    # Core visualizer
+│   ├── example_usage.py       # Usage examples
+│   ├── pipeline_integration.py # Pipeline integration
+│   └── README.md              # Documentation
+├── CMakeLists.txt          # Build configuration
+└── pyproject.toml          # Python packaging
+```
+
+## Datasets Supported
+
+- KITTI Odometry
+- Ouster LiDAR
+- ROS Bags
+- Mulran
+- NCD
+- NCLT
+- Apollo
+- HeliPR
+- MCAP
+
+See `retro_slam/datasets/` for all dataset loaders.
+
+## Configuration
+
+Configuration is handled via YAML files. See the main README.md for configuration options.
+
+## Development
+
+### Building from Source
+
+```bash
+mkdir build && cd build
+cmake ..
+make
+make install
+```
+
+### Running Tests
+
+```bash
+make test-python
+```
+
+## License
+
+MIT License - see LICENSE file for details.

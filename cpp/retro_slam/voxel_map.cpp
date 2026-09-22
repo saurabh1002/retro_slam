@@ -27,7 +27,6 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
-#include <sophus/se3.hpp>
 #include <tuple>
 #include <vector>
 
@@ -125,10 +124,10 @@ std::tuple<Vector3dVector, Vector3dVector> VoxelMap::PerVoxelMeanAndNormal() con
     return {std::move(voxel_means), std::move(voxel_normals)};
 }
 
-void VoxelMap::IntegrateFrame(const Vector3dVector &points, const Sophus::SE3d &pose) {
+void VoxelMap::IntegrateFrame(const Vector3dVector &points, const Eigen::Matrix4d &pose) {
     std::vector<Eigen::Vector3d> points_transformed(points.size());
-    const Eigen::Matrix3d R = pose.rotationMatrix();
-    const Eigen::Vector3d t = pose.translation();
+    const Eigen::Matrix3d R = pose.block<3, 3>(0, 0);
+    const Eigen::Vector3d t = pose.block<3, 1>(0, 3);
     std::transform(points.cbegin(), points.cend(), points_transformed.begin(),
                    [&](const auto &point) { return R * point + t; });
     AddPoints(points_transformed);

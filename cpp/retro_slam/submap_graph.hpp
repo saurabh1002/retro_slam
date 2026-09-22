@@ -22,7 +22,6 @@
 #pragma once
 
 #include <Eigen/Core>
-#include <sophus/se3.hpp>
 #include <vector>
 
 #include "kiss_icp/core/Registration.hpp"
@@ -43,24 +42,24 @@ using Matrix6d = Eigen::Matrix<double, 6, 6>;
 
 namespace retro_slam {
 struct Result {
-    Sophus::SE3d refined_pose;
+    Eigen::Matrix4d refined_pose;
     Eigen::Matrix6d hessian;
     double fitness_score;
 };
 
 struct Submap {
-    Submap(const int id, const int scan_id, const Sophus::SE3d &keypose)
+    Submap(const int id, const int scan_id, const Eigen::Matrix4d &keypose)
         : id(id), scan_id(scan_id), keypose(keypose) {
-        traj.emplace_back(Sophus::SE3d());
+        traj.emplace_back(Eigen::Matrix4d::Identity());
     }
 
-    void emplace_back(const Sophus::SE3d &pose) { traj.emplace_back(pose); }
-    Sophus::SE3d endpose() const { return traj.size() > 0 ? keypose * traj.back() : keypose; }
+    void emplace_back(const Eigen::Matrix4d &pose) { traj.emplace_back(pose); }
+    Eigen::Matrix4d endpose() const { return traj.size() > 0 ? keypose * traj.back() : keypose; }
 
     int id;
     int scan_id;
-    Sophus::SE3d keypose;
-    std::vector<Sophus::SE3d> traj;
+    Eigen::Matrix4d keypose;
+    std::vector<Eigen::Matrix4d> traj;
     std::vector<Eigen::Vector3d> pcd;
 };
 
@@ -73,19 +72,19 @@ struct SubmapGraph {
 
     Submap &CurrentSubmap() { return graph.back(); }
 
-    Sophus::SE3d CurrentKeypose() const { return graph.back().keypose; }
+    Eigen::Matrix4d CurrentKeypose() const { return graph.back().keypose; }
 
     void EraseCurrentSubmap() {
         graph.pop_back();
         current_id--;
     }
 
-    void FinalizeSubmap(const std::vector<Sophus::SE3d> &local_trajectory,
+    void FinalizeSubmap(const std::vector<Eigen::Matrix4d> &local_trajectory,
                         const std::vector<Eigen::Vector3d> &pointcloud);
 
     Result RegisterSubmaps(const int source_id,
                            const int target_id,
-                           const Sophus::SE3d &initial_guess) const;
+                           const Eigen::Matrix4d &initial_guess) const;
     int current_id = 0;
     std::vector<Submap> graph;
     kiss_icp::pipeline::KISSConfig odometry_config_;

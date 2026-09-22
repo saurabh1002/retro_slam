@@ -33,7 +33,7 @@
 namespace retro_slam {
 SubmapGraph::SubmapGraph(const kiss_icp::pipeline::KISSConfig &odometry_config)
     : current_id(0), odometry_config_(odometry_config) {
-    Submap first_submap(0, 0, Sophus::SE3d());
+    Submap first_submap(0, 0, Eigen::Matrix4d::Identity());
     first_submap.traj.clear();
     graph.emplace_back(std::move(first_submap));
 }
@@ -41,11 +41,11 @@ SubmapGraph::SubmapGraph(const kiss_icp::pipeline::KISSConfig &odometry_config)
 std::vector<Eigen::Matrix4d> SubmapGraph::Keyposes() const {
     std::vector<Eigen::Matrix4d> poses(graph.size());
     std::transform(graph.cbegin(), graph.cend(), poses.begin(),
-                   [](const auto &submap) { return submap.keypose.matrix(); });
+                   [](const auto &submap) { return submap.keypose; });
     return poses;
 }
 
-void SubmapGraph::FinalizeSubmap(const std::vector<Sophus::SE3d> &local_trajectory,
+void SubmapGraph::FinalizeSubmap(const std::vector<Eigen::Matrix4d> &local_trajectory,
                                  const std::vector<Eigen::Vector3d> &pointcloud) {
     Submap &submap = CurrentSubmap();
     submap.pcd = pointcloud;
@@ -53,13 +53,13 @@ void SubmapGraph::FinalizeSubmap(const std::vector<Sophus::SE3d> &local_trajecto
 
     current_id++;
     const int scan_id = submap.scan_id + static_cast<int>(submap.traj.size()) - 1;
-    const Sophus::SE3d new_keypose = submap.endpose();
+    const Eigen::Matrix4d new_keypose = submap.endpose();
     graph.emplace_back(current_id, scan_id, new_keypose);
 }
 
 Result SubmapGraph::RegisterSubmaps(const int source_id,
                                     const int target_id,
-                                    const Sophus::SE3d &initial_guess) const {
+                                    const Eigen::Matrix4d &initial_guess) const {
     kiss_icp::Registration registration_pipeline(odometry_config_.max_num_iterations,
                                                  odometry_config_.convergence_criterion,
                                                  odometry_config_.max_num_threads);
@@ -68,9 +68,9 @@ Result SubmapGraph::RegisterSubmaps(const int source_id,
     kiss_icp::VoxelHashMap target_map(voxel_size, voxel_map_max_range);
     target_map.AddPoints(target_points);
     const Sophus::SE3d pose = registration_pipeline.AlignPointsToMap(
-        source_points, target_map, initial_guess, icp_threshold, kernel_scale_factor);
+        source_points, target_map, Sophus::SE3d(initial_guess), icp_threshold, kernel_scale_factor);
     const Eigen::Matrix6d hessian =
         registration_pipeline.GetHessian(source_points, target_map, pose, icp_threshold);
-    return {pose, hessian, registration_pipeline.fitness_};
+    return {pose.matrix(), hessian, registration_pipeline.fitness_};
 }
 }  // namespace retro_slam

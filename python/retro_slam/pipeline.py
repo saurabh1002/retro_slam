@@ -34,6 +34,7 @@ from retro_slam.config import load_config, write_config
 from retro_slam.metrics import sequence_error
 from retro_slam.slam import RetroSLAM
 from retro_slam.tools.pipeline_results import PipelineResults
+from retro_slam.visualizers.visualizer import Viz
 
 
 class SlamPipeline:
@@ -64,11 +65,15 @@ class SlamPipeline:
 
         self.retro_slam = RetroSLAM(self.slam_config)
 
+        self.viz = None
+        if visualize:
+            self.viz = Viz()
+
     def run(self):
+        self._create_output_dir()
         self._run_pipeline()
         self._run_evaluation()
         self._evaluate_closures()
-        self._create_output_dir()
         self._write_result_poses()
         self._write_gt_poses()
         self._write_cfg()
@@ -83,8 +88,23 @@ class SlamPipeline:
             start_time = time.perf_counter_ns()
             self.retro_slam.process_scan(scan, timestamps)
             self.times[scan_idx] = time.perf_counter_ns() - start_time
+            if self.viz:
+                self.viz.log_slam_state(self.retro_slam, scan=scan, time_ns=timestamps[-1])
         self.retro_slam.exit()
         self.poses = self.retro_slam.poses
+
+    def _run_evaluation(self):
+        if self.has_gt:
+            ate_trans, rpe_trans = sequence_error(self.gt_poses, self.poses)
+            self.results.append(desc="RPE (translation)", units="%", value=rpe_trans)
+            self.results.append(desc="ATE (translation)", units="m", value=ate_trans)
+
+        fps = self._get_fps()
+        avg_fps = int(np.floor(fps))
+        avg_ms = int(np.ceil(1e3 / fps)) if fps > 0 else 0
+        if avg_fps > 0:
+            self.results.append(desc="Average Frequency", units="Hz", value=avg_fps, trunc=True)
+            self.results.append(desc="Average Runtime", units="ms", value=avg_ms, trunc=True)
 
     def _evaluate_closures(self):
         self.results.append(
@@ -175,21 +195,6 @@ class SlamPipeline:
         times_nozero = self.times[self.times != 0]
         total_time_s = np.sum(times_nozero) * 1e-9
         return float(times_nozero.shape[0] / total_time_s) if total_time_s > 0 else 0
-
-    def _run_evaluation(self):
-        # Run estimation metrics evaluation, only when GT data was provided
-        if self.has_gt:
-            ate_trans, rpe_trans = sequence_error(self.gt_poses, self.poses)
-            self.results.append(desc="RPE (translation)", units="%", value=rpe_trans)
-            self.results.append(desc="ATE (translation)", units="m", value=ate_trans)
-
-        # Run timing metrics evaluation, always
-        fps = self._get_fps()
-        avg_fps = int(np.floor(fps))
-        avg_ms = int(np.ceil(1e3 / fps)) if fps > 0 else 0
-        if avg_fps > 0:
-            self.results.append(desc="Average Frequency", units="Hz", value=avg_fps, trunc=True)
-            self.results.append(desc="Average Runtime", units="ms", value=avg_ms, trunc=True)
 
     def _write_log(self):
         if not self.results.empty():

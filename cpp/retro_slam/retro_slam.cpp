@@ -34,13 +34,13 @@
 #include "submap_graph.hpp"
 
 namespace {
-inline Vector3dVector trajectory_in_global_frame(const std::vector<Sophus::SE3d> &local_traj,
-                                                 const Sophus::SE3d &keypose) {
+inline Vector3dVector trajectory_in_global_frame(const std::vector<Eigen::Matrix4d> &local_traj,
+                                                 const Eigen::Matrix4d &keypose) {
     Vector3dVector traj(local_traj.size());
-    const Eigen::Matrix3d R = keypose.rotationMatrix();
-    const Eigen::Vector3d t = keypose.translation();
+    const Eigen::Matrix3d R = keypose.block<3, 3>(0, 0);
+    const Eigen::Vector3d t = keypose.block<3, 1>(0, 3);
     std::transform(local_traj.cbegin(), local_traj.cend(), traj.begin(),
-                   [&](const Sophus::SE3d &pose) { return R * pose.translation() + t; });
+                   [&](const Eigen::Matrix4d &pose) { return R * pose.block<3, 1>(0, 3) + t; });
     return traj;
 }
 
@@ -118,19 +118,22 @@ void RetroSLAM::ProcessScan(const Vector3dVector &scan_points,
         odometry_pipeline_.RegisterFrame(scan_points, scan_timestamps);
     const Eigen::Matrix6d &hessian = odometry_pipeline_.hessian();
 
-    const Sophus::SE3d scan_to_odom_pose = odometry_pipeline_.pose();
+    const Eigen::Matrix4d scan_to_odom_pose = odometry_pipeline_.pose().matrix();
     slam_state_.localmap_T_scan = slam_state_.odom_T_localmap.inverse() * scan_to_odom_pose;
     slam_state_.submap_T_scan = slam_state_.odom_T_submap.inverse() * scan_to_odom_pose;
+
+    latest_scan_points_ = deskewed_frame;
+    latest_scan_pose_ = submap_graph_.CurrentKeypose() * slam_state_.submap_T_scan.matrix();
 
     local_map_voxel_grid_.IntegrateFrame(deskewed_frame, slam_state_.localmap_T_scan);
     submap_voxel_grid_.IntegrateFrame(deskewed_frame, slam_state_.submap_T_scan);
 
-    local_trajectory_.emplace_back(slam_state_.submap_T_scan);
+    local_trajectory_.emplace_back(slam_state_.submap_T_scan.matrix());
     hessians_.emplace_back(hessian);
 
-    const bool split_local_map = slam_state_.localmap_T_scan.translation().norm() >
+    const bool split_local_map = slam_state_.localmap_T_scan.block<3, 1>(0, 3).norm() >
                                  config_.local_mapper.localmap_splitting_distance;
-    const bool split_submap = slam_state_.submap_T_scan.translation().norm() >
+    const bool split_submap = slam_state_.submap_T_scan.block<3, 1>(0, 3).norm() >
                               config_.local_mapper.submap_splitting_distance;
     if (split_submap || split_local_map) {
         FinalizeSubmap({local_trajectory_, hessians_, submap_voxel_grid_.Pointcloud()});
@@ -151,22 +154,22 @@ void RetroSLAM::FinalizeSubmap(const SubmapData &submap_data) {
     const auto &hessians = submap_data.hessians;
     const auto &pointcloud = submap_data.pointcloud;
     submap_ids_in_local_map_.emplace_back(submap_graph_.current_id);
-    const Sophus::SE3d current_keypose = submap_graph_.CurrentKeypose();
+    const Eigen::Matrix4d current_keypose = submap_graph_.CurrentKeypose();
     for (int id = 1; id < static_cast<int>(trajectory.size()); ++id) {
         const int current_scan_id = submap_graph_.CurrentSubmap().scan_id + id;
-        const Sophus::SE3d &previous_local_pose = trajectory[id - 1];
-        const Sophus::SE3d &current_local_pose = trajectory[id];
-        optimizer_.AddVariable(current_scan_id, (current_keypose * current_local_pose).matrix());
+        const Eigen::Matrix4d &previous_local_pose = trajectory[id - 1];
+        const Eigen::Matrix4d &current_local_pose = trajectory[id];
+        optimizer_.AddVariable(current_scan_id, current_keypose * current_local_pose);
         optimizer_.AddFactor(current_scan_id, current_scan_id - 1,
-                             (previous_local_pose.inverse() * current_local_pose).matrix(),
-                             hessians[id], false);
+                             previous_local_pose.inverse() * current_local_pose, hessians[id],
+                             false);
     }
     submap_graph_.FinalizeSubmap(trajectory, pointcloud);
 }
 
 void RetroSLAM::ResetSubmap() {
     const Vector3dVector retained_points = submap_voxel_grid_.PointsWithinRadiusFromLocation(
-        slam_state_.submap_T_scan.translation(), config_.odometry.max_range);
+        slam_state_.submap_T_scan.block<3, 1>(0, 3), config_.odometry.max_range);
     submap_voxel_grid_.Clear();
     submap_voxel_grid_.IntegrateFrame(retained_points, slam_state_.submap_T_scan.inverse());
     local_trajectory_.erase(local_trajectory_.begin() + 1, local_trajectory_.end());
@@ -181,7 +184,7 @@ std::tuple<Vector3dVector, Vector3dVector, Vector3dVector> RetroSLAM::FinalizeLo
 
 void RetroSLAM::ResetLocalMap() {
     const Vector3dVector retained_points = local_map_voxel_grid_.PointsWithinRadiusFromLocation(
-        slam_state_.localmap_T_scan.translation(), config_.odometry.max_range);
+        slam_state_.localmap_T_scan.block<3, 1>(0, 3), config_.odometry.max_range);
     local_map_voxel_grid_.Clear();
     local_map_voxel_grid_.IntegrateFrame(retained_points, slam_state_.localmap_T_scan.inverse());
 }
@@ -193,23 +196,23 @@ bool RetroSLAM::ComputeClosures(const Vector3dVector &query_points,
     const auto result = closer_.Compute(query_points, voxel_means, voxel_normals);
     if (result.success) {
         return ComputeLoopClosuresConstraints(result.ref_id, result.query_id,
-                                              result.pose_constraint);
+                                              result.pose_constraint.matrix());
     }
     return false;
 }
 
 bool RetroSLAM::ComputeLoopClosuresConstraints(const int src_localmap_id,
                                                const int tgt_localmap_id,
-                                               const Sophus::SE3d &pose_constraint) {
+                                               const Eigen::Matrix4d &pose_constraint) {
     // process source submaps
     const auto &src_submap_ids = slam_state_.submaps_per_localmap[src_localmap_id];
     std::span<Submap> src_submaps =
         std::span{submap_graph_.graph}.subspan(src_submap_ids.front(), src_submap_ids.size());
 
-    const Sophus::SE3d src_first_keypose_inv = src_submaps.front().keypose.inverse();
-    const Sophus::SE3d pose_constraint_times_first_keypose_inv =
+    const Eigen::Matrix4d src_first_keypose_inv = src_submaps.front().keypose.inverse();
+    const Eigen::Matrix4d pose_constraint_times_first_keypose_inv =
         pose_constraint * src_first_keypose_inv;
-    std::vector<Sophus::SE3d> src_keyposes(src_submaps.size());
+    std::vector<Eigen::Matrix4d> src_keyposes(src_submaps.size());
     std::transform(src_submaps.begin(), src_submaps.end(), src_keyposes.begin(),
                    [&](const Submap &submap) {
                        return pose_constraint_times_first_keypose_inv * submap.keypose;
@@ -227,8 +230,8 @@ bool RetroSLAM::ComputeLoopClosuresConstraints(const int src_localmap_id,
     const std::span<Submap> tgt_submaps =
         std::span{submap_graph_.graph}.subspan(tgt_submap_ids.front(), tgt_submap_ids.size());
 
-    const Sophus::SE3d tgt_first_keypose_inv = tgt_submaps.front().keypose.inverse();
-    std::vector<Sophus::SE3d> tgt_keyposes(tgt_submaps.size());
+    const Eigen::Matrix4d tgt_first_keypose_inv = tgt_submaps.front().keypose.inverse();
+    std::vector<Eigen::Matrix4d> tgt_keyposes(tgt_submaps.size());
     std::transform(tgt_submaps.begin(), tgt_submaps.end(), tgt_keyposes.begin(),
                    [&](const Submap &submap) { return tgt_first_keypose_inv * submap.keypose; });
 
@@ -263,7 +266,7 @@ void RetroSLAM::ComputeGraphTraversalConstraints(const int current_localmap_quer
         const std::span<Submap> tgt_submaps =
             std::span{submap_graph_.graph}.subspan(tgt_submap_ids.front(), tgt_submap_ids.size());
 
-        std::vector<Sophus::SE3d> tgt_keyposes(tgt_submaps.size());
+        std::vector<Eigen::Matrix4d> tgt_keyposes(tgt_submaps.size());
         std::transform(tgt_submaps.begin(), tgt_submaps.end(), tgt_keyposes.begin(),
                        [&](const Submap &submap) { return submap.keypose; });
         std::vector<Vector3dVector> tgt_trajectories;
@@ -282,12 +285,13 @@ void RetroSLAM::ComputeGraphTraversalConstraints(const int current_localmap_quer
                 src_submap_ids.front(), src_submap_ids.size());
 
             // Local Maps too far away to be overlapping, skip registration
-            if ((tgt_submaps[0].keypose.translation() - src_submaps[0].keypose.translation())
+            if ((tgt_submaps[0].keypose.block<3, 1>(0, 3) -
+                 src_submaps[0].keypose.block<3, 1>(0, 3))
                     .norm() > (2 * config_.odometry.max_range)) {
                 continue;
             }
 
-            std::vector<Sophus::SE3d> src_keyposes(src_submaps.size());
+            std::vector<Eigen::Matrix4d> src_keyposes(src_submaps.size());
             std::transform(src_submaps.begin(), src_submaps.end(), src_keyposes.begin(),
                            [&](const Submap &submap) { return submap.keypose; });
 
@@ -319,8 +323,8 @@ void RetroSLAM::ComputeGraphTraversalConstraints(const int current_localmap_quer
 std::vector<RegistrationCandidate> RetroSLAM::FindRegistrationCandidates(
     const std::span<Submap> &src_submaps,
     const std::span<Submap> &tgt_submaps,
-    const std::vector<Sophus::SE3d> &src_keyposes,
-    const std::vector<Sophus::SE3d> &tgt_keyposes,
+    const std::vector<Eigen::Matrix4d> &src_keyposes,
+    const std::vector<Eigen::Matrix4d> &tgt_keyposes,
     const std::vector<Vector3dVector> &src_trajectories,
     const std::vector<Vector3dVector> &tgt_trajectories) {
     std::vector<double> hausdorff_distances(tgt_submaps.size());
@@ -339,7 +343,7 @@ std::vector<RegistrationCandidate> RetroSLAM::FindRegistrationCandidates(
         if (*min_distance_it <= hausdorff_distance_threshold_) {
             const Submap &src_submap = src_submaps[src_idx];
             const Submap &tgt_submap = tgt_submaps[tgt_idx];
-            const Sophus::SE3d initial_guess =
+            const Eigen::Matrix4d initial_guess =
                 tgt_keyposes[tgt_idx].inverse() * src_keyposes[src_idx];
             candidates.emplace_back(src_submap.id, tgt_submap.id, src_submap.scan_id,
                                     tgt_submap.scan_id, initial_guess);
@@ -381,15 +385,15 @@ void RetroSLAM::OptimizePoseGraph() {
 
     std::for_each(submap_graph_.graph.begin(), submap_graph_.graph.end() - 1, [&](Submap &submap) {
         const int submap_scan_id = submap.scan_id;
-        submap.keypose = Sophus::SE3d(estimates[submap_scan_id]);
-        const Sophus::SE3d inv_keypose = submap.keypose.inverse();
+        submap.keypose = estimates[submap_scan_id];
+        const Eigen::Matrix4d inv_keypose = submap.keypose.inverse();
         for (int i = 0; i < static_cast<int>(submap.traj.size()); ++i) {
-            submap.traj[i] = inv_keypose * Sophus::SE3d(estimates[submap_scan_id + i]);
+            submap.traj[i] = inv_keypose * estimates[submap_scan_id + i];
         }
     });
 
     Submap &current_submap = submap_graph_.CurrentSubmap();
-    current_submap.keypose = Sophus::SE3d(estimates[current_submap.scan_id]);
+    current_submap.keypose = estimates[current_submap.scan_id];
 }
 
 void RetroSLAM::Exit() {

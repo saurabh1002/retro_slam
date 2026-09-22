@@ -40,13 +40,13 @@ struct RegistrationCandidate {
     int tgt_id;
     int src_scan_id;
     int tgt_scan_id;
-    Sophus::SE3d initial_guess;
+    Eigen::Matrix4d initial_guess;
 
     RegistrationCandidate(const int src_id,
                           const int tgt_id,
                           const int src_scan_id,
                           const int tgt_scan_id,
-                          const Sophus::SE3d &initial_guess)
+                          const Eigen::Matrix4d &initial_guess)
         : src_id(src_id),
           tgt_id(tgt_id),
           src_scan_id(src_scan_id),
@@ -61,7 +61,7 @@ struct RegistrationResult {
     int tgt_scan_id;
 
     double fitness_score;
-    Sophus::SE3d pose;
+    Eigen::Matrix4d pose;
     Eigen::Matrix6d hessian;
 
     RegistrationResult(const int src_id,
@@ -69,7 +69,7 @@ struct RegistrationResult {
                        const int src_scan_id,
                        const int tgt_scan_id,
                        const double fitness_score,
-                       const Sophus::SE3d &pose,
+                       const Eigen::Matrix4d &pose,
                        const Eigen::Matrix6d &hessian)
         : src_id(src_id),
           tgt_id(tgt_id),
@@ -85,10 +85,10 @@ namespace retro_slam {
 struct SlamState {
     int last_closure_query_id = -1;
     int last_closure_ref_id = -1;
-    Sophus::SE3d odom_T_localmap = Sophus::SE3d();
-    Sophus::SE3d localmap_T_scan = Sophus::SE3d();
-    Sophus::SE3d odom_T_submap = Sophus::SE3d();
-    Sophus::SE3d submap_T_scan = Sophus::SE3d();
+    Eigen::Matrix4d odom_T_localmap = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d localmap_T_scan = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d odom_T_submap = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d submap_T_scan = Eigen::Matrix4d::Identity();
 
     std::vector<std::vector<int>> submaps_per_localmap;
 };
@@ -100,9 +100,18 @@ struct Closures {
 };
 
 struct SubmapData {
-    std::vector<Sophus::SE3d> trajectory;
+    std::vector<Eigen::Matrix4d> trajectory;
     std::vector<Eigen::Matrix<double, 6, 6>> hessians;
     std::vector<Eigen::Vector3d> pointcloud;
+};
+
+struct VisualizationState {
+    std::vector<Eigen::Matrix4d> global_trajectory;
+    std::vector<Eigen::Matrix4d> local_trajectory;
+    std::vector<Eigen::Matrix4d> keyposes;
+    std::vector<Eigen::Vector3d> latest_scan_points;
+    Eigen::Matrix4d latest_scan_pose = Eigen::Matrix4d::Identity();
+    std::vector<Closures> loop_closures;
 };
 
 class RetroSLAM {
@@ -126,21 +135,33 @@ public:
 
     std::vector<Eigen::Matrix4d> Poses() const { return optimizer_.Estimates(); }
     std::vector<Eigen::Matrix4d> Keyposes() const { return submap_graph_.Keyposes(); }
-    Sophus::SE3d CurrentKeypose() const { return submap_graph_.CurrentKeypose(); }
+    Eigen::Matrix4d CurrentKeypose() const { return submap_graph_.CurrentKeypose(); }
     const std::vector<retro_slam::Submap> &Submaps() const { return submap_graph_.graph; }
+    const std::vector<Eigen::Vector3d> &LatestScanPoints() const { return latest_scan_points_; }
+    const Eigen::Matrix4d &LatestScanPose() const { return latest_scan_pose_; }
+    VisualizationState LatestVisualizationState() const {
+        VisualizationState state;
+        state.global_trajectory = optimizer_.Estimates();
+        state.local_trajectory = local_trajectory_;
+        state.keyposes = submap_graph_.Keyposes();
+        state.latest_scan_points = latest_scan_points_;
+        state.latest_scan_pose = latest_scan_pose_;
+        state.loop_closures = loop_closures;
+        return state;
+    }
 
 private:
     bool ComputeLoopClosuresConstraints(const int src_localmap_id,
                                         const int tgt_localmap_id,
-                                        const Sophus::SE3d &pose_constraint);
+                                        const Eigen::Matrix4d &pose_constraint);
 
     void ComputeGraphTraversalConstraints(const int current_localmap_query_id,
                                           const int current_localmap_ref_id);
     std::vector<RegistrationCandidate> FindRegistrationCandidates(
         const std::span<retro_slam::Submap> &src_submaps,
         const std::span<retro_slam::Submap> &tgt_submaps,
-        const std::vector<Sophus::SE3d> &src_keyposes,
-        const std::vector<Sophus::SE3d> &tgt_keyposes,
+        const std::vector<Eigen::Matrix4d> &src_keyposes,
+        const std::vector<Eigen::Matrix4d> &tgt_keyposes,
         const std::vector<Vector3dVector> &src_trajectories,
         const std::vector<Vector3dVector> &tgt_trajectories);
 
@@ -155,7 +176,7 @@ private:
     RetroSlamConfig config_;
 
     SlamState slam_state_{};
-    std::vector<Sophus::SE3d> local_trajectory_;
+    std::vector<Eigen::Matrix4d> local_trajectory_;
     std::vector<Eigen::Matrix<double, 6, 6>> hessians_;
     std::vector<int> submap_ids_in_local_map_;
     double hausdorff_distance_threshold_ = 0.0;
@@ -167,6 +188,8 @@ private:
 
     VoxelMap submap_voxel_grid_;
     VoxelMap local_map_voxel_grid_;
+    std::vector<Eigen::Vector3d> latest_scan_points_;
+    Eigen::Matrix4d latest_scan_pose_ = Eigen::Matrix4d::Identity();
 
 public:
     std::vector<Closures> loop_closures;
