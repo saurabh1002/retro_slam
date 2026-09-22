@@ -43,7 +43,6 @@ using Matrix6d = Eigen::Matrix<double, 6, 6>;
 namespace retro_slam {
 struct Result {
     Eigen::Matrix4d refined_pose;
-    Eigen::Matrix6d hessian;
     double fitness_score;
 };
 

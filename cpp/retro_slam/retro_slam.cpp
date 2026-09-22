@@ -116,7 +116,6 @@ void RetroSLAM::ProcessScan(const Vector3dVector &scan_points,
                             const std::vector<double> &scan_timestamps) {
     const auto &[deskewed_frame, _] =
         odometry_pipeline_.RegisterFrame(scan_points, scan_timestamps);
-    const Eigen::Matrix6d &hessian = odometry_pipeline_.hessian();
 
     const Eigen::Matrix4d scan_to_odom_pose = odometry_pipeline_.pose().matrix();
     slam_state_.localmap_T_scan = slam_state_.odom_T_localmap.inverse() * scan_to_odom_pose;
@@ -129,14 +128,13 @@ void RetroSLAM::ProcessScan(const Vector3dVector &scan_points,
     submap_voxel_grid_.IntegrateFrame(deskewed_frame, slam_state_.submap_T_scan);
 
     local_trajectory_.emplace_back(slam_state_.submap_T_scan.matrix());
-    hessians_.emplace_back(hessian);
 
     const bool split_local_map = slam_state_.localmap_T_scan.block<3, 1>(0, 3).norm() >
                                  config_.local_mapper.localmap_splitting_distance;
     const bool split_submap = slam_state_.submap_T_scan.block<3, 1>(0, 3).norm() >
                               config_.local_mapper.submap_splitting_distance;
     if (split_submap || split_local_map) {
-        FinalizeSubmap({local_trajectory_, hessians_, submap_voxel_grid_.Pointcloud()});
+        FinalizeSubmap({local_trajectory_, submap_voxel_grid_.Pointcloud()});
         ResetSubmap();
         slam_state_.odom_T_submap = scan_to_odom_pose;
     }
@@ -151,7 +149,6 @@ void RetroSLAM::ProcessScan(const Vector3dVector &scan_points,
 
 void RetroSLAM::FinalizeSubmap(const SubmapData &submap_data) {
     const auto &trajectory = submap_data.trajectory;
-    const auto &hessians = submap_data.hessians;
     const auto &pointcloud = submap_data.pointcloud;
     submap_ids_in_local_map_.emplace_back(submap_graph_.current_id);
     const Eigen::Matrix4d current_keypose = submap_graph_.CurrentKeypose();
@@ -161,8 +158,8 @@ void RetroSLAM::FinalizeSubmap(const SubmapData &submap_data) {
         const Eigen::Matrix4d &current_local_pose = trajectory[id];
         optimizer_.AddVariable(current_scan_id, current_keypose * current_local_pose);
         optimizer_.AddFactor(current_scan_id, current_scan_id - 1,
-                             previous_local_pose.inverse() * current_local_pose, hessians[id],
-                             false);
+                             previous_local_pose.inverse() * current_local_pose,
+                             Eigen::Matrix6d::Identity(), false);
     }
     submap_graph_.FinalizeSubmap(trajectory, pointcloud);
 }
@@ -173,7 +170,6 @@ void RetroSLAM::ResetSubmap() {
     submap_voxel_grid_.Clear();
     submap_voxel_grid_.IntegrateFrame(retained_points, slam_state_.submap_T_scan.inverse());
     local_trajectory_.erase(local_trajectory_.begin() + 1, local_trajectory_.end());
-    hessians_.erase(hessians_.begin() + 1, hessians_.end());
 }
 
 std::tuple<Vector3dVector, Vector3dVector, Vector3dVector> RetroSLAM::FinalizeLocalMap() {
@@ -357,11 +353,11 @@ std::vector<RegistrationResult> RetroSLAM::RegisterCandidates(
     std::vector<RegistrationResult> results;
     results.reserve(candidates.size());
     for (const auto &candidate : candidates) {
-        const auto &[pose, hessian, fitness_score] = submap_graph_.RegisterSubmaps(
+        const auto &[pose, fitness_score] = submap_graph_.RegisterSubmaps(
             candidate.src_id, candidate.tgt_id, candidate.initial_guess);
 
         results.emplace_back(candidate.src_id, candidate.tgt_id, candidate.src_scan_id,
-                             candidate.tgt_scan_id, fitness_score, pose, hessian);
+                             candidate.tgt_scan_id, fitness_score, pose);
     }
     return results;
 }
@@ -373,7 +369,7 @@ bool RetroSLAM::AddRegistrationFactors(const std::vector<RegistrationResult> &re
             valid_constraints = true;
             loop_closures.emplace_back(result.src_id, result.tgt_id);
             optimizer_.AddFactor(result.src_scan_id, result.tgt_scan_id, result.pose.matrix(),
-                                 result.hessian, false);
+                                 Eigen::Matrix6d::Identity(), false);
         }
     }
     return valid_constraints;
@@ -398,7 +394,7 @@ void RetroSLAM::OptimizePoseGraph() {
 
 void RetroSLAM::Exit() {
     if (local_trajectory_.size() > 1) {
-        FinalizeSubmap({local_trajectory_, hessians_, submap_voxel_grid_.Pointcloud()});
+        FinalizeSubmap({local_trajectory_, submap_voxel_grid_.Pointcloud()});
     }
     if (submap_ids_in_local_map_.size() > 0) {
         const auto &[pointcloud, voxel_means, voxel_normals] = FinalizeLocalMap();
