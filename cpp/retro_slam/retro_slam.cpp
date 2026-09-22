@@ -44,19 +44,6 @@ inline Vector3dVector trajectory_in_global_frame(const std::vector<Eigen::Matrix
     return traj;
 }
 
-std::vector<Eigen::Vector3d> stack_trajectories(
-    const std::vector<std::vector<Eigen::Vector3d>> &trajectories) {
-    const size_t num_points =
-        std::transform_reduce(trajectories.cbegin(), trajectories.cend(), 0, std::plus<>(),
-                              [](const std::vector<Eigen::Vector3d> &traj) { return traj.size(); });
-    std::vector<Eigen::Vector3d> stacked_trajectories;
-    stacked_trajectories.reserve(num_points);
-    for (const auto &traj : trajectories) {
-        stacked_trajectories.insert(stacked_trajectories.end(), traj.begin(), traj.end());
-    }
-    return stacked_trajectories;
-}
-
 inline double compute_hausdorff_distance(const std::vector<Eigen::Vector3d> &set1,
                                          const std::vector<Eigen::Vector3d> &set2,
                                          const double max_distance_threshold) {
@@ -248,76 +235,8 @@ bool RetroSLAM::ComputeLoopClosuresConstraints(const int src_localmap_id,
     const bool closure_inserted = AddRegistrationFactors(results);
     if (closure_inserted) {
         OptimizePoseGraph();
-        if (slam_state_.last_closure_query_id != -1) {
-            ComputeGraphTraversalConstraints(tgt_localmap_id, src_localmap_id);
-        }
-        slam_state_.last_closure_query_id = tgt_localmap_id;
-        slam_state_.last_closure_ref_id = src_localmap_id;
     }
     return closure_inserted;
-}
-
-void RetroSLAM::ComputeGraphTraversalConstraints(const int current_localmap_query_id,
-                                                 const int current_localmap_ref_id) {
-    bool closure_inserted = false;
-    for (int tgt_localmap_id = slam_state_.last_closure_query_id + 1;
-         tgt_localmap_id < current_localmap_query_id; ++tgt_localmap_id) {
-        const auto &tgt_submap_ids = slam_state_.submaps_per_localmap[tgt_localmap_id];
-        const std::span<Submap> tgt_submaps =
-            std::span{submap_graph_.graph}.subspan(tgt_submap_ids.front(), tgt_submap_ids.size());
-
-        std::vector<Eigen::Matrix4d> tgt_keyposes(tgt_submaps.size());
-        std::transform(tgt_submaps.begin(), tgt_submaps.end(), tgt_keyposes.begin(),
-                       [&](const Submap &submap) { return submap.keypose; });
-        std::vector<Vector3dVector> tgt_trajectories;
-        tgt_trajectories.reserve(tgt_submaps.size());
-        for (const auto &submap : tgt_submaps) {
-            tgt_trajectories.emplace_back(trajectory_in_global_frame(submap.traj, submap.keypose));
-        }
-
-        const auto stacked_target_trajectories = stack_trajectories(tgt_trajectories);
-        for (int src_localmap_id =
-                 std::min(current_localmap_ref_id, slam_state_.last_closure_ref_id) + 1;
-             src_localmap_id < std::max(current_localmap_ref_id, slam_state_.last_closure_ref_id);
-             ++src_localmap_id) {
-            const auto &src_submap_ids = slam_state_.submaps_per_localmap[src_localmap_id];
-            const std::span<Submap> src_submaps = std::span{submap_graph_.graph}.subspan(
-                src_submap_ids.front(), src_submap_ids.size());
-
-            // Local Maps too far away to be overlapping, skip registration
-            if ((tgt_submaps[0].keypose.block<3, 1>(0, 3) -
-                 src_submaps[0].keypose.block<3, 1>(0, 3))
-                    .norm() > (2 * config_.odometry.max_range)) {
-                continue;
-            }
-
-            std::vector<Eigen::Matrix4d> src_keyposes(src_submaps.size());
-            std::transform(src_submaps.begin(), src_submaps.end(), src_keyposes.begin(),
-                           [&](const Submap &submap) { return submap.keypose; });
-
-            std::vector<Vector3dVector> src_trajectories;
-            src_trajectories.reserve(src_submaps.size());
-            for (const auto &submap : src_submaps) {
-                src_trajectories.emplace_back(
-                    trajectory_in_global_frame(submap.traj, submap.keypose));
-            }
-
-            const auto stacked_source_trajectories = stack_trajectories(src_trajectories);
-
-            const double hausdorff_distance =
-                compute_hausdorff_distance(stacked_source_trajectories, stacked_target_trajectories,
-                                           config_.odometry.max_range);
-            // Local Maps too far away to be overlapping, skip registration
-            if (hausdorff_distance <= config_.odometry.max_range) {
-                const auto candidates =
-                    FindRegistrationCandidates(src_submaps, tgt_submaps, src_keyposes, tgt_keyposes,
-                                               src_trajectories, tgt_trajectories);
-                const auto results = RegisterCandidates(candidates);
-                closure_inserted = AddRegistrationFactors(results);
-            }
-        }
-    }
-    if (closure_inserted) OptimizePoseGraph();
 }
 
 std::vector<RegistrationCandidate> RetroSLAM::FindRegistrationCandidates(

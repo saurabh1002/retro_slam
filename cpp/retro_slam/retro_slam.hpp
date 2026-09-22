@@ -83,8 +83,6 @@ struct RegistrationResult {
 
 namespace retro_slam {
 struct SlamState {
-    int last_closure_query_id = -1;
-    int last_closure_ref_id = -1;
     Eigen::Matrix4d odom_T_localmap = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d localmap_T_scan = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d odom_T_submap = Eigen::Matrix4d::Identity();
@@ -155,8 +153,6 @@ private:
                                         const int tgt_localmap_id,
                                         const Eigen::Matrix4d &pose_constraint);
 
-    void ComputeGraphTraversalConstraints(const int current_localmap_query_id,
-                                          const int current_localmap_ref_id);
     std::vector<RegistrationCandidate> FindRegistrationCandidates(
         const std::span<retro_slam::Submap> &src_submaps,
         const std::span<retro_slam::Submap> &tgt_submaps,
