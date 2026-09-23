@@ -33,6 +33,24 @@
 #include "RetroSlamConfig.h"
 #include "submap_graph.hpp"
 
+namespace retro_slam {
+inline void UpdateTimingStats(TimingStats &stats, const double elapsed_ms) {
+    stats.count += 1;
+    stats.sum += elapsed_ms;
+    stats.mean = stats.sum / static_cast<double>(stats.count);
+    stats.min = std::min(stats.min, elapsed_ms);
+    stats.max = std::max(stats.max, elapsed_ms);
+}
+
+inline std::string FormatTimingStats(const TimingStats &stats, const std::string &label) {
+    std::ostringstream oss;
+    oss << label << ": count=" << stats.count << ", mean_ms=" << std::fixed << std::setprecision(3)
+        << stats.mean << ", min_ms=" << stats.min << ", max_ms=" << stats.max
+        << ", total_ms=" << stats.sum;
+    return oss.str();
+}
+}  // namespace retro_slam
+
 namespace {
 inline Vector3dVector trajectory_in_global_frame(const std::vector<Eigen::Matrix4d> &local_traj,
                                                  const Eigen::Matrix4d &keypose) {
@@ -99,6 +117,47 @@ using retro_slam::Submap;
 using Vector3dVector = Vector3dVector;
 
 namespace retro_slam {
+std::string ProfilerSummary::ToString() const {
+    std::ostringstream oss;
+    oss << "retro_slam.runtime_summary\n"
+        << "raw_scans=" << raw_scan_count << "\n"
+        << "mean_fps=" << std::fixed << std::setprecision(3) << mean_fps() << "\n"
+        << "loop_closure_calls=" << loop_closure_invocations << "\n"
+        << "loop_closure_successes=" << loop_closure_successes << "\n"
+        << "traversal_closure_calls=" << traversal_closure_invocations << "\n"
+        << "traversal_closure_successes=" << traversal_closure_successes << "\n"
+        << "pose_graph_optimizations=" << pose_graph_optimizations << "\n"
+        << "raw_scans_per_pose_graph_optimization=" << std::fixed << std::setprecision(3)
+        << raw_scans_per_pose_graph_optimization() << "\n"
+        << "raw_scans_per_loop_closure=" << std::fixed << std::setprecision(3)
+        << raw_scans_per_loop_closure() << "\n"
+        << "raw_scans_per_traversal_closure=" << std::fixed << std::setprecision(3)
+        << raw_scans_per_traversal_closure() << "\n"
+        << "odometry_per_frame: count=" << odometry_per_frame.count << ", mean_ms=" << std::fixed
+        << std::setprecision(3) << odometry_per_frame.mean << ", min_ms=" << odometry_per_frame.min
+        << ", max_ms=" << odometry_per_frame.max << ", total_ms=" << odometry_per_frame.sum << "\n"
+        << "pose_graph_optimization: count=" << pose_graph_optimization.count
+        << ", mean_ms=" << std::fixed << std::setprecision(3) << pose_graph_optimization.mean
+        << ", min_ms=" << pose_graph_optimization.min << ", max_ms=" << pose_graph_optimization.max
+        << ", total_ms=" << pose_graph_optimization.sum << "\n"
+        << "loop_closure: count=" << loop_closure.count << ", mean_ms=" << std::fixed
+        << std::setprecision(3) << loop_closure.mean << ", min_ms=" << loop_closure.min
+        << ", max_ms=" << loop_closure.max << ", total_ms=" << loop_closure.sum << "\n"
+        << "traversal_closure: count=" << traversal_closure.count << ", mean_ms=" << std::fixed
+        << std::setprecision(3) << traversal_closure.mean << ", min_ms=" << traversal_closure.min
+        << ", max_ms=" << traversal_closure.max << ", total_ms=" << traversal_closure.sum << "\n";
+    return oss.str();
+}
+
+void RetroSLAM::DumpProfilerSummary(const std::string &filename) const {
+    std::ofstream ofs(filename, std::ios::out | std::ios::trunc);
+    if (!ofs.is_open()) {
+        throw std::runtime_error("Unable to open profiler summary output: " + filename);
+    }
+    ofs << profiler_summary_.ToString();
+    ofs.close();
+}
+
 RetroSLAM::RetroSLAM(const RetroSlamConfig &config)
     : config_(config),
       hausdorff_distance_threshold_(config.odometry.max_range),
@@ -114,8 +173,15 @@ RetroSLAM::RetroSLAM(const RetroSlamConfig &config)
 
 void RetroSLAM::ProcessScan(const Vector3dVector &scan_points,
                             const std::vector<double> &scan_timestamps) {
+    using Clock = std::chrono::steady_clock;
+    const auto odometry_start = Clock::now();
     const auto &[deskewed_frame, _] =
         odometry_pipeline_.RegisterFrame(scan_points, scan_timestamps);
+    const auto odometry_elapsed_ms =
+        std::chrono::duration<double, std::milli>(Clock::now() - odometry_start).count();
+    UpdateTimingStats(profiler_summary_.odometry_per_frame, odometry_elapsed_ms);
+    profiler_summary_.raw_scan_count += 1;
+
     const Eigen::Matrix6d &hessian = odometry_pipeline_.hessian();
 
     const Eigen::Matrix4d scan_to_odom_pose = odometry_pipeline_.pose().matrix();
@@ -142,7 +208,13 @@ void RetroSLAM::ProcessScan(const Vector3dVector &scan_points,
     }
     if (split_local_map) {
         const auto &[pointcloud, voxel_means, voxel_normals] = FinalizeLocalMap();
-        ComputeClosures(pointcloud, voxel_means, voxel_normals);
+        const auto loop_start = Clock::now();
+        const bool loop_closure_found = ComputeClosures(pointcloud, voxel_means, voxel_normals);
+        const auto loop_elapsed_ms =
+            std::chrono::duration<double, std::milli>(Clock::now() - loop_start).count();
+        profiler_summary_.loop_closure_successes += static_cast<std::size_t>(loop_closure_found);
+        profiler_summary_.loop_closure_invocations += 1;
+        UpdateTimingStats(profiler_summary_.loop_closure, loop_elapsed_ms);
         ResetLocalMap();
         slam_state_.odom_T_localmap = scan_to_odom_pose;
         submap_ids_in_local_map_.clear();
@@ -246,8 +318,14 @@ bool RetroSLAM::ComputeLoopClosuresConstraints(const int src_localmap_id,
         src_submaps, tgt_submaps, src_keyposes, tgt_keyposes, src_trajectories, tgt_trajectories);
     const auto results = RegisterCandidates(candidates);
     const bool closure_inserted = AddRegistrationFactors(results);
+    using Clock = std::chrono::steady_clock;
     if (closure_inserted) {
+        const auto optimize_start = Clock::now();
         OptimizePoseGraph();
+        UpdateTimingStats(
+            profiler_summary_.pose_graph_optimization,
+            std::chrono::duration<double, std::milli>(Clock::now() - optimize_start).count());
+        profiler_summary_.pose_graph_optimizations += 1;
         if (slam_state_.last_closure_query_id != -1) {
             ComputeGraphTraversalConstraints(tgt_localmap_id, src_localmap_id);
         }
@@ -259,6 +337,8 @@ bool RetroSLAM::ComputeLoopClosuresConstraints(const int src_localmap_id,
 
 void RetroSLAM::ComputeGraphTraversalConstraints(const int current_localmap_query_id,
                                                  const int current_localmap_ref_id) {
+    using Clock = std::chrono::steady_clock;
+    const auto traversal_start = Clock::now();
     bool closure_inserted = false;
     for (int tgt_localmap_id = slam_state_.last_closure_query_id + 1;
          tgt_localmap_id < current_localmap_query_id; ++tgt_localmap_id) {
@@ -284,7 +364,6 @@ void RetroSLAM::ComputeGraphTraversalConstraints(const int current_localmap_quer
             const std::span<Submap> src_submaps = std::span{submap_graph_.graph}.subspan(
                 src_submap_ids.front(), src_submap_ids.size());
 
-            // Local Maps too far away to be overlapping, skip registration
             if ((tgt_submaps[0].keypose.block<3, 1>(0, 3) -
                  src_submaps[0].keypose.block<3, 1>(0, 3))
                     .norm() > (2 * config_.odometry.max_range)) {
@@ -307,17 +386,28 @@ void RetroSLAM::ComputeGraphTraversalConstraints(const int current_localmap_quer
             const double hausdorff_distance =
                 compute_hausdorff_distance(stacked_source_trajectories, stacked_target_trajectories,
                                            config_.odometry.max_range);
-            // Local Maps too far away to be overlapping, skip registration
             if (hausdorff_distance <= config_.odometry.max_range) {
                 const auto candidates =
                     FindRegistrationCandidates(src_submaps, tgt_submaps, src_keyposes, tgt_keyposes,
                                                src_trajectories, tgt_trajectories);
                 const auto results = RegisterCandidates(candidates);
-                closure_inserted = AddRegistrationFactors(results);
+                closure_inserted = AddRegistrationFactors(results) || closure_inserted;
             }
         }
     }
-    if (closure_inserted) OptimizePoseGraph();
+    const auto traversal_elapsed_ms =
+        std::chrono::duration<double, std::milli>(Clock::now() - traversal_start).count();
+    profiler_summary_.traversal_closure_invocations += 1;
+    if (closure_inserted) {
+        profiler_summary_.traversal_closure_successes += 1;
+        const auto optimize_start = Clock::now();
+        OptimizePoseGraph();
+        UpdateTimingStats(
+            profiler_summary_.pose_graph_optimization,
+            std::chrono::duration<double, std::milli>(Clock::now() - optimize_start).count());
+        profiler_summary_.pose_graph_optimizations += 1;
+    }
+    UpdateTimingStats(profiler_summary_.traversal_closure, traversal_elapsed_ms);
 }
 
 std::vector<RegistrationCandidate> RetroSLAM::FindRegistrationCandidates(

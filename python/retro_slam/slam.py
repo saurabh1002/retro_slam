@@ -42,6 +42,13 @@ class RetroSLAM:
     def exit(self):
         self.retro_slam._exit()
 
+    def dump_profiler_summary(self, filename: str):
+        self.retro_slam._dump_profiler_summary(filename)
+
+    @property
+    def profiler_summary(self) -> str:
+        return self.retro_slam._profiler_summary()
+
     @property
     def poses(self) -> np.ndarray:
         return np.asarray(self.retro_slam._poses())

@@ -22,8 +22,15 @@
 #pragma once
 
 #include <Eigen/Core>
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <limits>
+#include <map>
 #include <sophus/se3.hpp>
 #include <span>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -82,6 +89,49 @@ struct RegistrationResult {
 }  // namespace
 
 namespace retro_slam {
+struct TimingStats {
+    double min = std::numeric_limits<double>::max();
+    double max = 0.0;
+    double mean = 0.0;
+    double sum = 0.0;
+    std::size_t count = 0;
+};
+
+struct ProfilerSummary {
+    TimingStats odometry_per_frame;
+    TimingStats pose_graph_optimization;
+    TimingStats loop_closure;
+    TimingStats traversal_closure;
+    std::size_t raw_scan_count = 0;
+    std::size_t loop_closure_invocations = 0;
+    std::size_t loop_closure_successes = 0;
+    std::size_t traversal_closure_invocations = 0;
+    std::size_t traversal_closure_successes = 0;
+    std::size_t pose_graph_optimizations = 0;
+    double mean_fps() const {
+        return odometry_per_frame.count > 0 ? static_cast<double>(odometry_per_frame.count) /
+                                                  (odometry_per_frame.sum / 1000.0)
+                                            : 0.0;
+    }
+    double raw_scans_per_pose_graph_optimization() const {
+        return pose_graph_optimizations > 0 ? static_cast<double>(raw_scan_count) /
+                                                  static_cast<double>(pose_graph_optimizations)
+                                            : 0.0;
+    }
+    double raw_scans_per_loop_closure() const {
+        return loop_closure_invocations > 0 ? static_cast<double>(raw_scan_count) /
+                                                  static_cast<double>(loop_closure_invocations)
+                                            : 0.0;
+    }
+    double raw_scans_per_traversal_closure() const {
+        return traversal_closure_invocations > 0
+                   ? static_cast<double>(raw_scan_count) /
+                         static_cast<double>(traversal_closure_invocations)
+                   : 0.0;
+    }
+    std::string ToString() const;
+};
+
 struct SlamState {
     int last_closure_query_id = -1;
     int last_closure_ref_id = -1;
@@ -139,6 +189,8 @@ public:
     const std::vector<retro_slam::Submap> &Submaps() const { return submap_graph_.graph; }
     const std::vector<Eigen::Vector3d> &LatestScanPoints() const { return latest_scan_points_; }
     const Eigen::Matrix4d &LatestScanPose() const { return latest_scan_pose_; }
+    const ProfilerSummary &ProfilerStats() const { return profiler_summary_; }
+    void DumpProfilerSummary(const std::string &filename) const;
     VisualizationState LatestVisualizationState() const {
         VisualizationState state;
         state.global_trajectory = optimizer_.Estimates();
@@ -190,6 +242,7 @@ private:
     VoxelMap local_map_voxel_grid_;
     std::vector<Eigen::Vector3d> latest_scan_points_;
     Eigen::Matrix4d latest_scan_pose_ = Eigen::Matrix4d::Identity();
+    ProfilerSummary profiler_summary_{};
 
 public:
     std::vector<Closures> loop_closures;

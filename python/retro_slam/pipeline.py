@@ -80,6 +80,9 @@ class SlamPipeline:
         self._write_log()
         self._write_graph()
         self._write_closures()
+        self.retro_slam.dump_profiler_summary(
+            os.path.join(self.results_dir, "profiler_summary.txt")
+        )
         return self.results
 
     def _run_pipeline(self):
