@@ -169,13 +169,5 @@ PYBIND11_MODULE(retro_slam_pybind, m) {
         .def("_latest_scan_pose",
              [](const RetroSLAM &slam) { return py::cast(slam.LatestScanPose()); })
         .def("_write_pose_graph", &RetroSLAM::WritePoseGraph, "filename"_a)
-        .def(
-            "_dump_profiler_summary",
-            [](const RetroSLAM &slam, const std::string &filename) {
-                slam.DumpProfilerSummary(filename);
-            },
-            "filename"_a)
-        .def("_profiler_summary",
-             [](const RetroSLAM &slam) { return slam.ProfilerStats().ToString(); })
         .def_readonly("loop_closures_", &RetroSLAM::loop_closures);
 }

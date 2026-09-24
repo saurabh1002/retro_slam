@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <optional>
 #include <sophus/se3.hpp>
 #include <span>
 #include <utility>
@@ -33,59 +34,36 @@
 #include "RetroSlamConfig.h"
 #include "submap_graph.hpp"
 
-namespace retro_slam {
-inline void UpdateTimingStats(TimingStats &stats, const double elapsed_ms) {
-    stats.count += 1;
-    stats.sum += elapsed_ms;
-    stats.mean = stats.sum / static_cast<double>(stats.count);
-    stats.min = std::min(stats.min, elapsed_ms);
-    stats.max = std::max(stats.max, elapsed_ms);
-}
-
-inline std::string FormatTimingStats(const TimingStats &stats, const std::string &label) {
-    std::ostringstream oss;
-    oss << label << ": count=" << stats.count << ", mean_ms=" << std::fixed << std::setprecision(3)
-        << stats.mean << ", min_ms=" << stats.min << ", max_ms=" << stats.max
-        << ", total_ms=" << stats.sum;
-    return oss.str();
-}
-}  // namespace retro_slam
-
 namespace {
-inline Vector3dVector trajectory_in_global_frame(const std::vector<Eigen::Matrix4d> &local_traj,
-                                                 const Eigen::Matrix4d &keypose) {
-    Vector3dVector traj(local_traj.size());
-    const Eigen::Matrix3d R = keypose.block<3, 3>(0, 0);
-    const Eigen::Vector3d t = keypose.block<3, 1>(0, 3);
-    std::transform(local_traj.cbegin(), local_traj.cend(), traj.begin(),
-                   [&](const Eigen::Matrix4d &pose) { return R * pose.block<3, 1>(0, 3) + t; });
-    return traj;
-}
-
-std::vector<Eigen::Vector3d> stack_trajectories(
-    const std::vector<std::vector<Eigen::Vector3d>> &trajectories) {
-    const size_t num_points =
-        std::transform_reduce(trajectories.cbegin(), trajectories.cend(), 0, std::plus<>(),
-                              [](const std::vector<Eigen::Vector3d> &traj) { return traj.size(); });
-    std::vector<Eigen::Vector3d> stacked_trajectories;
-    stacked_trajectories.reserve(num_points);
-    for (const auto &traj : trajectories) {
-        stacked_trajectories.insert(stacked_trajectories.end(), traj.begin(), traj.end());
+std::vector<Eigen::Matrix4d> compute_localmap_trajectory(
+    const std::span<retro_slam::Submap> &submaps) {
+    std::vector<Eigen::Matrix4d> localmap_trajectory;
+    const size_t num_poses =
+        std::transform_reduce(submaps.begin(), submaps.end(), static_cast<size_t>(0), std::plus<>(),
+                              [](const auto &submap) { return submap.traj.size(); });
+    localmap_trajectory.reserve(num_poses);
+    for (const auto &submap : submaps) {
+        const auto &keypose = submap.keypose;
+        for (const auto &pose : submap.traj) {
+            localmap_trajectory.emplace_back(keypose * pose);
+        }
     }
-    return stacked_trajectories;
+    return localmap_trajectory;
 }
 
-inline double compute_hausdorff_distance(const std::vector<Eigen::Vector3d> &set1,
-                                         const std::vector<Eigen::Vector3d> &set2,
+inline double compute_hausdorff_distance(const std::vector<Eigen::Matrix4d> &source_traj,
+                                         const std::vector<Eigen::Matrix4d> &target_traj,
                                          const double max_distance_threshold) {
     double max_distance_threshold_sq = max_distance_threshold * max_distance_threshold;
     double max_distance = 0.0;
 
-    // Check distance from set1 to set2
-    for (const auto &point1 : set1) {
+    // Check distance from source to target
+    for (const auto &pose_src : source_traj) {
         double min_distance = std::numeric_limits<double>::max();
-        for (const auto &point2 : set2) {
-            min_distance = std::min(min_distance, (point1 - point2).squaredNorm());
+        for (const auto &pose_tgt : target_traj) {
+            min_distance =
+                std::min(min_distance,
+                         (pose_src.block<3, 1>(0, 3) - pose_tgt.block<3, 1>(0, 3)).squaredNorm());
         }
         if (min_distance > max_distance_threshold_sq) {
             return std::numeric_limits<double>::max();
@@ -93,11 +71,13 @@ inline double compute_hausdorff_distance(const std::vector<Eigen::Vector3d> &set
         max_distance = std::max(max_distance, min_distance);
     }
 
-    // Check distance from set2 to set1
-    for (const auto &point2 : set2) {
+    // Check distance from target to source
+    for (const auto &pose_tgt : target_traj) {
         double min_distance = std::numeric_limits<double>::max();
-        for (const auto &point1 : set1) {
-            min_distance = std::min(min_distance, (point1 - point2).squaredNorm());
+        for (const auto &pose_src : source_traj) {
+            min_distance =
+                std::min(min_distance,
+                         (pose_src.block<3, 1>(0, 3) - pose_tgt.block<3, 1>(0, 3)).squaredNorm());
         }
         if (min_distance > max_distance_threshold_sq) {
             return std::numeric_limits<double>::max();
@@ -107,6 +87,18 @@ inline double compute_hausdorff_distance(const std::vector<Eigen::Vector3d> &set
 
     return std::sqrt(max_distance);
 }
+
+inline double compute_hausdorff_distance(const std::vector<Eigen::Matrix4d> &source_traj,
+                                         const std::vector<Eigen::Matrix4d> &target_traj,
+                                         const Eigen::Matrix4d &relative_pose,
+                                         const double max_distance_threshold) {
+    std::vector<Eigen::Matrix4d> transformed_source_traj;
+    transformed_source_traj.reserve(source_traj.size());
+    for (const auto &pose : source_traj) {
+        transformed_source_traj.emplace_back(relative_pose * pose);
+    }
+    return compute_hausdorff_distance(transformed_source_traj, target_traj, max_distance_threshold);
+}
 }  // namespace
 
 namespace Eigen {
@@ -114,49 +106,9 @@ using Matrix6d = Eigen::Matrix<double, 6, 6>;
 }  // namespace Eigen
 
 using retro_slam::Submap;
-using Vector3dVector = Vector3dVector;
+using Vector3dVector = std::vector<Eigen::Vector3d>;
 
 namespace retro_slam {
-std::string ProfilerSummary::ToString() const {
-    std::ostringstream oss;
-    oss << "retro_slam.runtime_summary\n"
-        << "raw_scans=" << raw_scan_count << "\n"
-        << "mean_fps=" << std::fixed << std::setprecision(3) << mean_fps() << "\n"
-        << "loop_closure_calls=" << loop_closure_invocations << "\n"
-        << "loop_closure_successes=" << loop_closure_successes << "\n"
-        << "traversal_closure_calls=" << traversal_closure_invocations << "\n"
-        << "traversal_closure_successes=" << traversal_closure_successes << "\n"
-        << "pose_graph_optimizations=" << pose_graph_optimizations << "\n"
-        << "raw_scans_per_pose_graph_optimization=" << std::fixed << std::setprecision(3)
-        << raw_scans_per_pose_graph_optimization() << "\n"
-        << "raw_scans_per_loop_closure=" << std::fixed << std::setprecision(3)
-        << raw_scans_per_loop_closure() << "\n"
-        << "raw_scans_per_traversal_closure=" << std::fixed << std::setprecision(3)
-        << raw_scans_per_traversal_closure() << "\n"
-        << "odometry_per_frame: count=" << odometry_per_frame.count << ", mean_ms=" << std::fixed
-        << std::setprecision(3) << odometry_per_frame.mean << ", min_ms=" << odometry_per_frame.min
-        << ", max_ms=" << odometry_per_frame.max << ", total_ms=" << odometry_per_frame.sum << "\n"
-        << "pose_graph_optimization: count=" << pose_graph_optimization.count
-        << ", mean_ms=" << std::fixed << std::setprecision(3) << pose_graph_optimization.mean
-        << ", min_ms=" << pose_graph_optimization.min << ", max_ms=" << pose_graph_optimization.max
-        << ", total_ms=" << pose_graph_optimization.sum << "\n"
-        << "loop_closure: count=" << loop_closure.count << ", mean_ms=" << std::fixed
-        << std::setprecision(3) << loop_closure.mean << ", min_ms=" << loop_closure.min
-        << ", max_ms=" << loop_closure.max << ", total_ms=" << loop_closure.sum << "\n"
-        << "traversal_closure: count=" << traversal_closure.count << ", mean_ms=" << std::fixed
-        << std::setprecision(3) << traversal_closure.mean << ", min_ms=" << traversal_closure.min
-        << ", max_ms=" << traversal_closure.max << ", total_ms=" << traversal_closure.sum << "\n";
-    return oss.str();
-}
-
-void RetroSLAM::DumpProfilerSummary(const std::string &filename) const {
-    std::ofstream ofs(filename, std::ios::out | std::ios::trunc);
-    if (!ofs.is_open()) {
-        throw std::runtime_error("Unable to open profiler summary output: " + filename);
-    }
-    ofs << profiler_summary_.ToString();
-    ofs.close();
-}
 
 RetroSLAM::RetroSLAM(const RetroSlamConfig &config)
     : config_(config),
@@ -173,16 +125,9 @@ RetroSLAM::RetroSLAM(const RetroSlamConfig &config)
 
 void RetroSLAM::ProcessScan(const Vector3dVector &scan_points,
                             const std::vector<double> &scan_timestamps) {
-    using Clock = std::chrono::steady_clock;
-    const auto odometry_start = Clock::now();
     const auto &[deskewed_frame, _] =
         odometry_pipeline_.RegisterFrame(scan_points, scan_timestamps);
-    const auto odometry_elapsed_ms =
-        std::chrono::duration<double, std::milli>(Clock::now() - odometry_start).count();
-    UpdateTimingStats(profiler_summary_.odometry_per_frame, odometry_elapsed_ms);
-    profiler_summary_.raw_scan_count += 1;
-
-    const Eigen::Matrix6d &hessian = odometry_pipeline_.hessian();
+    const Eigen::Matrix6d hessian = odometry_pipeline_.hessian();
 
     const Eigen::Matrix4d scan_to_odom_pose = odometry_pipeline_.pose().matrix();
     slam_state_.localmap_T_scan = slam_state_.odom_T_localmap.inverse() * scan_to_odom_pose;
@@ -208,13 +153,7 @@ void RetroSLAM::ProcessScan(const Vector3dVector &scan_points,
     }
     if (split_local_map) {
         const auto &[pointcloud, voxel_means, voxel_normals] = FinalizeLocalMap();
-        const auto loop_start = Clock::now();
         const bool loop_closure_found = ComputeClosures(pointcloud, voxel_means, voxel_normals);
-        const auto loop_elapsed_ms =
-            std::chrono::duration<double, std::milli>(Clock::now() - loop_start).count();
-        profiler_summary_.loop_closure_successes += static_cast<std::size_t>(loop_closure_found);
-        profiler_summary_.loop_closure_invocations += 1;
-        UpdateTimingStats(profiler_summary_.loop_closure, loop_elapsed_ms);
         ResetLocalMap();
         slam_state_.odom_T_localmap = scan_to_odom_pose;
         submap_ids_in_local_map_.clear();
@@ -276,56 +215,22 @@ bool RetroSLAM::ComputeClosures(const Vector3dVector &query_points,
 bool RetroSLAM::ComputeLoopClosuresConstraints(const int src_localmap_id,
                                                const int tgt_localmap_id,
                                                const Eigen::Matrix4d &pose_constraint) {
-    // process source submaps
     const auto &src_submap_ids = slam_state_.submaps_per_localmap[src_localmap_id];
     std::span<Submap> src_submaps =
-        std::span{submap_graph_.graph}.subspan(src_submap_ids.front(), src_submap_ids.size());
+        std::span{submap_graph_.graph}.subspan(src_submap_ids[0], src_submap_ids.size());
 
-    const Eigen::Matrix4d src_first_keypose_inv = src_submaps.front().keypose.inverse();
-    const Eigen::Matrix4d pose_constraint_times_first_keypose_inv =
-        pose_constraint * src_first_keypose_inv;
-    std::vector<Eigen::Matrix4d> src_keyposes(src_submaps.size());
-    std::transform(src_submaps.begin(), src_submaps.end(), src_keyposes.begin(),
-                   [&](const Submap &submap) {
-                       return pose_constraint_times_first_keypose_inv * submap.keypose;
-                   });
-
-    std::vector<Vector3dVector> src_trajectories;
-    src_trajectories.reserve(src_submaps.size());
-    for (size_t i = 0; i < src_submaps.size(); ++i) {
-        src_trajectories.emplace_back(
-            trajectory_in_global_frame(src_submaps[i].traj, src_keyposes[i]));
-    }
-
-    // process target submaps
     const auto &tgt_submap_ids = slam_state_.submaps_per_localmap[tgt_localmap_id];
     const std::span<Submap> tgt_submaps =
-        std::span{submap_graph_.graph}.subspan(tgt_submap_ids.front(), tgt_submap_ids.size());
+        std::span{submap_graph_.graph}.subspan(tgt_submap_ids[0], tgt_submap_ids.size());
 
-    const Eigen::Matrix4d tgt_first_keypose_inv = tgt_submaps.front().keypose.inverse();
-    std::vector<Eigen::Matrix4d> tgt_keyposes(tgt_submaps.size());
-    std::transform(tgt_submaps.begin(), tgt_submaps.end(), tgt_keyposes.begin(),
-                   [&](const Submap &submap) { return tgt_first_keypose_inv * submap.keypose; });
+    const Eigen::Matrix4d rel_pose_constraint =
+        tgt_submaps[0].keypose * pose_constraint * src_submaps[0].keypose.inverse();
+    const auto candidates =
+        FindRegistrationCandidates(src_submaps, tgt_submaps, rel_pose_constraint);
 
-    std::vector<Vector3dVector> tgt_trajectories;
-    tgt_trajectories.reserve(tgt_submaps.size());
-    for (size_t i = 0; i < tgt_submaps.size(); ++i) {
-        tgt_trajectories.emplace_back(
-            trajectory_in_global_frame(tgt_submaps[i].traj, tgt_keyposes[i]));
-    }
-
-    const auto candidates = FindRegistrationCandidates(
-        src_submaps, tgt_submaps, src_keyposes, tgt_keyposes, src_trajectories, tgt_trajectories);
-    const auto results = RegisterCandidates(candidates);
-    const bool closure_inserted = AddRegistrationFactors(results);
-    using Clock = std::chrono::steady_clock;
+    const bool closure_inserted = AddRegistrationFactors(candidates);
     if (closure_inserted) {
-        const auto optimize_start = Clock::now();
         OptimizePoseGraph();
-        UpdateTimingStats(
-            profiler_summary_.pose_graph_optimization,
-            std::chrono::duration<double, std::milli>(Clock::now() - optimize_start).count());
-        profiler_summary_.pose_graph_optimizations += 1;
         if (slam_state_.last_closure_query_id != -1) {
             ComputeGraphTraversalConstraints(tgt_localmap_id, src_localmap_id);
         }
@@ -337,136 +242,94 @@ bool RetroSLAM::ComputeLoopClosuresConstraints(const int src_localmap_id,
 
 void RetroSLAM::ComputeGraphTraversalConstraints(const int current_localmap_query_id,
                                                  const int current_localmap_ref_id) {
-    using Clock = std::chrono::steady_clock;
-    const auto traversal_start = Clock::now();
     bool closure_inserted = false;
     for (int tgt_localmap_id = slam_state_.last_closure_query_id + 1;
          tgt_localmap_id < current_localmap_query_id; ++tgt_localmap_id) {
         const auto &tgt_submap_ids = slam_state_.submaps_per_localmap[tgt_localmap_id];
         const std::span<Submap> tgt_submaps =
-            std::span{submap_graph_.graph}.subspan(tgt_submap_ids.front(), tgt_submap_ids.size());
+            std::span{submap_graph_.graph}.subspan(tgt_submap_ids[0], tgt_submap_ids.size());
 
-        std::vector<Eigen::Matrix4d> tgt_keyposes(tgt_submaps.size());
-        std::transform(tgt_submaps.begin(), tgt_submaps.end(), tgt_keyposes.begin(),
-                       [&](const Submap &submap) { return submap.keypose; });
-        std::vector<Vector3dVector> tgt_trajectories;
-        tgt_trajectories.reserve(tgt_submaps.size());
-        for (const auto &submap : tgt_submaps) {
-            tgt_trajectories.emplace_back(trajectory_in_global_frame(submap.traj, submap.keypose));
-        }
-
-        const auto stacked_target_trajectories = stack_trajectories(tgt_trajectories);
+        const auto target_localmap_trajectory = compute_localmap_trajectory(tgt_submaps);
         for (int src_localmap_id =
                  std::min(current_localmap_ref_id, slam_state_.last_closure_ref_id) + 1;
              src_localmap_id < std::max(current_localmap_ref_id, slam_state_.last_closure_ref_id);
              ++src_localmap_id) {
             const auto &src_submap_ids = slam_state_.submaps_per_localmap[src_localmap_id];
-            const std::span<Submap> src_submaps = std::span{submap_graph_.graph}.subspan(
-                src_submap_ids.front(), src_submap_ids.size());
+            const std::span<Submap> src_submaps =
+                std::span{submap_graph_.graph}.subspan(src_submap_ids[0], src_submap_ids.size());
 
             if ((tgt_submaps[0].keypose.block<3, 1>(0, 3) -
                  src_submaps[0].keypose.block<3, 1>(0, 3))
-                    .norm() > (2 * config_.odometry.max_range)) {
+                    .squaredNorm() >
+                (4 * config_.odometry.max_range * config_.odometry.max_range)) {
                 continue;
             }
 
-            std::vector<Eigen::Matrix4d> src_keyposes(src_submaps.size());
-            std::transform(src_submaps.begin(), src_submaps.end(), src_keyposes.begin(),
-                           [&](const Submap &submap) { return submap.keypose; });
+            const auto source_localmap_trajectory = compute_localmap_trajectory(src_submaps);
 
-            std::vector<Vector3dVector> src_trajectories;
-            src_trajectories.reserve(src_submaps.size());
-            for (const auto &submap : src_submaps) {
-                src_trajectories.emplace_back(
-                    trajectory_in_global_frame(submap.traj, submap.keypose));
-            }
-
-            const auto stacked_source_trajectories = stack_trajectories(src_trajectories);
-
-            const double hausdorff_distance =
-                compute_hausdorff_distance(stacked_source_trajectories, stacked_target_trajectories,
-                                           config_.odometry.max_range);
+            const double hausdorff_distance = compute_hausdorff_distance(
+                source_localmap_trajectory, target_localmap_trajectory, config_.odometry.max_range);
             if (hausdorff_distance <= config_.odometry.max_range) {
-                const auto candidates =
-                    FindRegistrationCandidates(src_submaps, tgt_submaps, src_keyposes, tgt_keyposes,
-                                               src_trajectories, tgt_trajectories);
-                const auto results = RegisterCandidates(candidates);
-                closure_inserted = AddRegistrationFactors(results) || closure_inserted;
+                const auto candidates = FindRegistrationCandidates(src_submaps, tgt_submaps,
+                                                                   Eigen::Matrix4d::Identity());
+
+                closure_inserted = AddRegistrationFactors(candidates) || closure_inserted;
             }
         }
     }
-    const auto traversal_elapsed_ms =
-        std::chrono::duration<double, std::milli>(Clock::now() - traversal_start).count();
-    profiler_summary_.traversal_closure_invocations += 1;
     if (closure_inserted) {
-        profiler_summary_.traversal_closure_successes += 1;
-        const auto optimize_start = Clock::now();
         OptimizePoseGraph();
-        UpdateTimingStats(
-            profiler_summary_.pose_graph_optimization,
-            std::chrono::duration<double, std::milli>(Clock::now() - optimize_start).count());
-        profiler_summary_.pose_graph_optimizations += 1;
     }
-    UpdateTimingStats(profiler_summary_.traversal_closure, traversal_elapsed_ms);
 }
 
 std::vector<RegistrationCandidate> RetroSLAM::FindRegistrationCandidates(
     const std::span<Submap> &src_submaps,
     const std::span<Submap> &tgt_submaps,
-    const std::vector<Eigen::Matrix4d> &src_keyposes,
-    const std::vector<Eigen::Matrix4d> &tgt_keyposes,
-    const std::vector<Vector3dVector> &src_trajectories,
-    const std::vector<Vector3dVector> &tgt_trajectories) {
+    const Eigen::Matrix4d &rel_pose_constraint) {
     std::vector<double> hausdorff_distances(tgt_submaps.size());
     std::vector<RegistrationCandidate> candidates;
     candidates.reserve(src_submaps.size());
-    for (size_t src_idx = 0; src_idx < src_submaps.size(); ++src_idx) {
-        const Vector3dVector &src_traj = src_trajectories[src_idx];
-        std::transform(tgt_trajectories.cbegin(), tgt_trajectories.cend(),
-                       hausdorff_distances.begin(), [&](const auto &tgt_traj) {
-                           return compute_hausdorff_distance(src_traj, tgt_traj,
-                                                             hausdorff_distance_threshold_);
-                       });
-        const auto min_distance_it =
-            std::min_element(hausdorff_distances.cbegin(), hausdorff_distances.cend());
-        const auto tgt_idx = std::distance(hausdorff_distances.cbegin(), min_distance_it);
-        if (*min_distance_it <= hausdorff_distance_threshold_) {
-            const Submap &src_submap = src_submaps[src_idx];
-            const Submap &tgt_submap = tgt_submaps[tgt_idx];
+    for (const Submap &src_submap : src_submaps) {
+        double lowest_hausdorff_distance = hausdorff_distance_threshold_;
+        std::optional<int> tgt_idx = std::nullopt;
+        const auto &src_traj = src_submap.traj;
+        const Eigen::Matrix4d src_keypose = src_submap.keypose;
+        for (int idx = 0; idx < static_cast<int>(tgt_submaps.size()); ++idx) {
+            const Submap &tgt_submap = tgt_submaps[idx];
+            const Eigen::Matrix4d relative_pose =
+                tgt_submap.keypose.inverse() * rel_pose_constraint * src_keypose;
+            const double hausdorff_distance = compute_hausdorff_distance(
+                src_traj, tgt_submap.traj, relative_pose, hausdorff_distance_threshold_);
+            hausdorff_distances[idx] = hausdorff_distance;
+            if (hausdorff_distance <= lowest_hausdorff_distance) {
+                lowest_hausdorff_distance = hausdorff_distance;
+                tgt_idx = idx;
+            }
+        }
+        if (tgt_idx.has_value()) {
+            const Submap &matched_tgt_submap = tgt_submaps[tgt_idx.value()];
             const Eigen::Matrix4d initial_guess =
-                tgt_keyposes[tgt_idx].inverse() * src_keyposes[src_idx];
-            candidates.emplace_back(src_submap.id, tgt_submap.id, src_submap.scan_id,
-                                    tgt_submap.scan_id, initial_guess);
+                matched_tgt_submap.keypose.inverse() * rel_pose_constraint * src_submap.keypose;
+            candidates.emplace_back(src_submap.id, matched_tgt_submap.id, src_submap.scan_id,
+                                    matched_tgt_submap.scan_id, initial_guess);
         }
     }
     return candidates;
 }
 
-std::vector<RegistrationResult> RetroSLAM::RegisterCandidates(
-    const std::vector<RegistrationCandidate> &candidates) {
-    std::vector<RegistrationResult> results;
-    results.reserve(candidates.size());
+bool RetroSLAM::AddRegistrationFactors(const std::vector<RegistrationCandidate> &candidates) {
+    bool closure_inserted = false;
     for (const auto &candidate : candidates) {
-        const auto &[pose, hessian, fitness_score] = submap_graph_.RegisterSubmaps(
-            candidate.src_id, candidate.tgt_id, candidate.initial_guess);
-
-        results.emplace_back(candidate.src_id, candidate.tgt_id, candidate.src_scan_id,
-                             candidate.tgt_scan_id, fitness_score, pose, hessian);
-    }
-    return results;
-}
-
-bool RetroSLAM::AddRegistrationFactors(const std::vector<RegistrationResult> &results) {
-    bool valid_constraints = false;
-    for (const auto &result : results) {
+        const auto result = submap_graph_.RegisterSubmaps(candidate.src_id, candidate.tgt_id,
+                                                         candidate.initial_guess);
         if (result.fitness_score > config_.loop_closer.fitness_threshold) {
-            valid_constraints = true;
-            loop_closures.emplace_back(result.src_id, result.tgt_id);
-            optimizer_.AddFactor(result.src_scan_id, result.tgt_scan_id, result.pose.matrix(),
+            closure_inserted = true;
+            loop_closures.emplace_back(candidate.src_id, candidate.tgt_id);
+            optimizer_.AddFactor(candidate.src_scan_id, candidate.tgt_scan_id, result.refined_pose.matrix(),
                                  result.hessian, false);
         }
     }
-    return valid_constraints;
+    return closure_inserted;
 }
 
 void RetroSLAM::OptimizePoseGraph() {

@@ -22,7 +22,6 @@
 #pragma once
 
 #include <Eigen/Core>
-#include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -60,78 +59,9 @@ struct RegistrationCandidate {
           tgt_scan_id(tgt_scan_id),
           initial_guess(initial_guess) {}
 };
-
-struct RegistrationResult {
-    int src_id;
-    int tgt_id;
-    int src_scan_id;
-    int tgt_scan_id;
-
-    double fitness_score;
-    Eigen::Matrix4d pose;
-    Eigen::Matrix6d hessian;
-
-    RegistrationResult(const int src_id,
-                       const int tgt_id,
-                       const int src_scan_id,
-                       const int tgt_scan_id,
-                       const double fitness_score,
-                       const Eigen::Matrix4d &pose,
-                       const Eigen::Matrix6d &hessian)
-        : src_id(src_id),
-          tgt_id(tgt_id),
-          src_scan_id(src_scan_id),
-          tgt_scan_id(tgt_scan_id),
-          fitness_score(fitness_score),
-          pose(pose),
-          hessian(hessian) {}
-};
 }  // namespace
 
 namespace retro_slam {
-struct TimingStats {
-    double min = std::numeric_limits<double>::max();
-    double max = 0.0;
-    double mean = 0.0;
-    double sum = 0.0;
-    std::size_t count = 0;
-};
-
-struct ProfilerSummary {
-    TimingStats odometry_per_frame;
-    TimingStats pose_graph_optimization;
-    TimingStats loop_closure;
-    TimingStats traversal_closure;
-    std::size_t raw_scan_count = 0;
-    std::size_t loop_closure_invocations = 0;
-    std::size_t loop_closure_successes = 0;
-    std::size_t traversal_closure_invocations = 0;
-    std::size_t traversal_closure_successes = 0;
-    std::size_t pose_graph_optimizations = 0;
-    double mean_fps() const {
-        return odometry_per_frame.count > 0 ? static_cast<double>(odometry_per_frame.count) /
-                                                  (odometry_per_frame.sum / 1000.0)
-                                            : 0.0;
-    }
-    double raw_scans_per_pose_graph_optimization() const {
-        return pose_graph_optimizations > 0 ? static_cast<double>(raw_scan_count) /
-                                                  static_cast<double>(pose_graph_optimizations)
-                                            : 0.0;
-    }
-    double raw_scans_per_loop_closure() const {
-        return loop_closure_invocations > 0 ? static_cast<double>(raw_scan_count) /
-                                                  static_cast<double>(loop_closure_invocations)
-                                            : 0.0;
-    }
-    double raw_scans_per_traversal_closure() const {
-        return traversal_closure_invocations > 0
-                   ? static_cast<double>(raw_scan_count) /
-                         static_cast<double>(traversal_closure_invocations)
-                   : 0.0;
-    }
-    std::string ToString() const;
-};
-
 struct SlamState {
     int last_closure_query_id = -1;
     int last_closure_ref_id = -1;
@@ -189,8 +119,6 @@ public:
     const std::vector<retro_slam::Submap> &Submaps() const { return submap_graph_.graph; }
     const std::vector<Eigen::Vector3d> &LatestScanPoints() const { return latest_scan_points_; }
     const Eigen::Matrix4d &LatestScanPose() const { return latest_scan_pose_; }
-    const ProfilerSummary &ProfilerStats() const { return profiler_summary_; }
-    void DumpProfilerSummary(const std::string &filename) const;
     VisualizationState LatestVisualizationState() const {
         VisualizationState state;
         state.global_trajectory = optimizer_.Estimates();
@@ -212,15 +140,9 @@ private:
     std::vector<RegistrationCandidate> FindRegistrationCandidates(
         const std::span<retro_slam::Submap> &src_submaps,
         const std::span<retro_slam::Submap> &tgt_submaps,
-        const std::vector<Eigen::Matrix4d> &src_keyposes,
-        const std::vector<Eigen::Matrix4d> &tgt_keyposes,
-        const std::vector<Vector3dVector> &src_trajectories,
-        const std::vector<Vector3dVector> &tgt_trajectories);
+        const Eigen::Matrix4d &rel_pose_constraint);
 
-    std::vector<RegistrationResult> RegisterCandidates(
-        const std::vector<RegistrationCandidate> &candidates);
-
-    bool AddRegistrationFactors(const std::vector<RegistrationResult> &results);
+    bool AddRegistrationFactors(const std::vector<RegistrationCandidate> &results);
 
     void OptimizePoseGraph();
 
@@ -242,7 +164,6 @@ private:
     VoxelMap local_map_voxel_grid_;
     std::vector<Eigen::Vector3d> latest_scan_points_;
     Eigen::Matrix4d latest_scan_pose_ = Eigen::Matrix4d::Identity();
-    ProfilerSummary profiler_summary_{};
 
 public:
     std::vector<Closures> loop_closures;
