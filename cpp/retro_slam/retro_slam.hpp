@@ -22,8 +22,14 @@
 #pragma once
 
 #include <Eigen/Core>
+#include <fstream>
+#include <iomanip>
+#include <limits>
+#include <map>
 #include <sophus/se3.hpp>
 #include <span>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -52,32 +58,6 @@ struct RegistrationCandidate {
           src_scan_id(src_scan_id),
           tgt_scan_id(tgt_scan_id),
           initial_guess(initial_guess) {}
-};
-
-struct RegistrationResult {
-    int src_id;
-    int tgt_id;
-    int src_scan_id;
-    int tgt_scan_id;
-
-    double fitness_score;
-    Eigen::Matrix4d pose;
-    Eigen::Matrix6d hessian;
-
-    RegistrationResult(const int src_id,
-                       const int tgt_id,
-                       const int src_scan_id,
-                       const int tgt_scan_id,
-                       const double fitness_score,
-                       const Eigen::Matrix4d &pose,
-                       const Eigen::Matrix6d &hessian)
-        : src_id(src_id),
-          tgt_id(tgt_id),
-          src_scan_id(src_scan_id),
-          tgt_scan_id(tgt_scan_id),
-          fitness_score(fitness_score),
-          pose(pose),
-          hessian(hessian) {}
 };
 }  // namespace
 
@@ -160,15 +140,9 @@ private:
     std::vector<RegistrationCandidate> FindRegistrationCandidates(
         const std::span<retro_slam::Submap> &src_submaps,
         const std::span<retro_slam::Submap> &tgt_submaps,
-        const std::vector<Eigen::Matrix4d> &src_keyposes,
-        const std::vector<Eigen::Matrix4d> &tgt_keyposes,
-        const std::vector<Vector3dVector> &src_trajectories,
-        const std::vector<Vector3dVector> &tgt_trajectories);
+        const Eigen::Matrix4d &rel_pose_constraint);
 
-    std::vector<RegistrationResult> RegisterCandidates(
-        const std::vector<RegistrationCandidate> &candidates);
-
-    bool AddRegistrationFactors(const std::vector<RegistrationResult> &results);
+    bool AddRegistrationFactors(const std::vector<RegistrationCandidate> &results);
 
     void OptimizePoseGraph();
 
