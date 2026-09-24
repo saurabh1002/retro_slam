@@ -33,7 +33,7 @@
 namespace retro_slam {
 SubmapGraph::SubmapGraph(const kiss_icp::pipeline::KISSConfig &odometry_config)
     : current_id(0), odometry_config_(odometry_config) {
-    Submap first_submap(0, 0, Eigen::Matrix4d::Identity());
+    Submap first_submap(0, Eigen::Matrix4d::Identity());
     first_submap.traj.clear();
     graph.emplace_back(std::move(first_submap));
 }
@@ -52,9 +52,8 @@ void SubmapGraph::FinalizeSubmap(const std::vector<Eigen::Matrix4d> &local_traje
     submap.traj = local_trajectory;
 
     current_id++;
-    const int scan_id = submap.scan_id + static_cast<int>(submap.traj.size()) - 1;
     const Eigen::Matrix4d new_keypose = submap.endpose();
-    graph.emplace_back(current_id, scan_id, new_keypose);
+    graph.emplace_back(current_id, new_keypose);
 }
 
 Result SubmapGraph::RegisterSubmaps(const int source_id,
@@ -69,8 +68,6 @@ Result SubmapGraph::RegisterSubmaps(const int source_id,
     target_map.AddPoints(target_points);
     const Sophus::SE3d pose = registration_pipeline.AlignPointsToMap(
         source_points, target_map, Sophus::SE3d(initial_guess), icp_threshold, kernel_scale_factor);
-    const Eigen::Matrix6d hessian =
-        registration_pipeline.GetHessian(source_points, target_map, pose, icp_threshold);
-    return {pose.matrix(), hessian, registration_pipeline.fitness_};
+    return {pose.matrix(), registration_pipeline.fitness_};
 }
 }  // namespace retro_slam

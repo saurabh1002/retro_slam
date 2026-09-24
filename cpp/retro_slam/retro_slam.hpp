@@ -38,46 +38,31 @@ namespace {
 struct RegistrationCandidate {
     int src_id;
     int tgt_id;
-    int src_scan_id;
-    int tgt_scan_id;
     Eigen::Matrix4d initial_guess;
 
     RegistrationCandidate(const int src_id,
                           const int tgt_id,
-                          const int src_scan_id,
-                          const int tgt_scan_id,
                           const Eigen::Matrix4d &initial_guess)
         : src_id(src_id),
           tgt_id(tgt_id),
-          src_scan_id(src_scan_id),
-          tgt_scan_id(tgt_scan_id),
           initial_guess(initial_guess) {}
 };
 
 struct RegistrationResult {
     int src_id;
     int tgt_id;
-    int src_scan_id;
-    int tgt_scan_id;
 
     double fitness_score;
     Eigen::Matrix4d pose;
-    Eigen::Matrix6d hessian;
 
     RegistrationResult(const int src_id,
                        const int tgt_id,
-                       const int src_scan_id,
-                       const int tgt_scan_id,
                        const double fitness_score,
-                       const Eigen::Matrix4d &pose,
-                       const Eigen::Matrix6d &hessian)
+                       const Eigen::Matrix4d &pose)
         : src_id(src_id),
           tgt_id(tgt_id),
-          src_scan_id(src_scan_id),
-          tgt_scan_id(tgt_scan_id),
           fitness_score(fitness_score),
-          pose(pose),
-          hessian(hessian) {}
+          pose(pose) {}
 };
 }  // namespace
 
@@ -94,14 +79,13 @@ struct SlamState {
 };
 
 struct Closures {
-    int ref_scan_id;
-    int query_scan_id;
-    Closures(const int ref_id, const int query_id) : ref_scan_id(ref_id), query_scan_id(query_id) {}
+    int ref_id;
+    int query_id;
+    Closures(const int ref_id, const int query_id) : ref_id(ref_id), query_id(query_id) {}
 };
 
 struct SubmapData {
     std::vector<Eigen::Matrix4d> trajectory;
-    std::vector<Eigen::Matrix<double, 6, 6>> hessians;
     std::vector<Eigen::Vector3d> pointcloud;
 };
 
@@ -133,7 +117,7 @@ public:
     void WritePoseGraph(const std::string &filename) const { optimizer_.WriteGraph(filename); }
     void Exit();
 
-    std::vector<Eigen::Matrix4d> Poses() const { return optimizer_.Estimates(); }
+    std::vector<Eigen::Matrix4d> Poses() const;
     std::vector<Eigen::Matrix4d> Keyposes() const { return submap_graph_.Keyposes(); }
     Eigen::Matrix4d CurrentKeypose() const { return submap_graph_.CurrentKeypose(); }
     const std::vector<retro_slam::Submap> &Submaps() const { return submap_graph_.graph; }
@@ -177,7 +161,6 @@ private:
 
     SlamState slam_state_{};
     std::vector<Eigen::Matrix4d> local_trajectory_;
-    std::vector<Eigen::Matrix<double, 6, 6>> hessians_;
     std::vector<int> submap_ids_in_local_map_;
     double hausdorff_distance_threshold_ = 0.0;
 

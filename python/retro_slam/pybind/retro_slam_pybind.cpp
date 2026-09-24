@@ -131,16 +131,16 @@ PYBIND11_MODULE(retro_slam_pybind, m) {
     py::bind_vector<std::vector<Closures>>(m, "ClosuresVector");
 
     py::class_<Closures>(m, "Closures")
-        .def(py::init<int, int>(), "ref_scan_id"_a, "query_scan_id"_a)
-        .def_readonly("ref_scan_id", &Closures::ref_scan_id)
-        .def_readonly("query_scan_id", &Closures::query_scan_id)
+        .def(py::init<int, int>(), "ref_id"_a, "query_id"_a)
+        .def_readonly("ref_id", &Closures::ref_id)
+        .def_readonly("query_id", &Closures::query_id)
         .def("__iter__",
              [](const Closures &self) {
-                 return py::iter(py::make_tuple(self.ref_scan_id, self.query_scan_id));
+                 return py::iter(py::make_tuple(self.ref_id, self.query_id));
              })
         .def("__repr__", [](const Closures &self) {
-            return "<Closures(ref_scan_id=" + std::to_string(self.ref_scan_id) +
-                   ", query_scan_id=" + std::to_string(self.query_scan_id) + ")>";
+            return "<Closures(ref_id=" + std::to_string(self.ref_id) +
+                   ", query_id=" + std::to_string(self.query_id) + ")>";
         });
 
     m.def("retro_slam_config_from_python", &GetConfigFromPython, "config"_a,

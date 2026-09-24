@@ -123,8 +123,8 @@ class SlamPipeline:
         fig, ax = plt.subplots()
         ax.scatter(poses[:, 0, 3], poses[:, 1, 3], s=0.1, color="black")
         for closure in self.retro_slam.loop_closures:
-            i = closure.ref_scan_id
-            j = closure.query_scan_id
+            i = closure.ref_id
+            j = closure.query_id
             p_i = key_poses[i]
             p_j = key_poses[j]
             ax.plot([p_i[0, -1], p_j[0, -1]], [p_i[1, -1], p_j[1, -1]], color="red", linewidth=1)

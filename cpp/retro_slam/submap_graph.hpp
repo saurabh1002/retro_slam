@@ -43,13 +43,11 @@ using Matrix6d = Eigen::Matrix<double, 6, 6>;
 namespace retro_slam {
 struct Result {
     Eigen::Matrix4d refined_pose;
-    Eigen::Matrix6d hessian;
     double fitness_score;
 };
 
 struct Submap {
-    Submap(const int id, const int scan_id, const Eigen::Matrix4d &keypose)
-        : id(id), scan_id(scan_id), keypose(keypose) {
+    Submap(const int id, const Eigen::Matrix4d &keypose) : id(id), keypose(keypose) {
         traj.emplace_back(Eigen::Matrix4d::Identity());
     }
 
@@ -57,7 +55,6 @@ struct Submap {
     Eigen::Matrix4d endpose() const { return traj.size() > 0 ? keypose * traj.back() : keypose; }
 
     int id;
-    int scan_id;
     Eigen::Matrix4d keypose;
     std::vector<Eigen::Matrix4d> traj;
     std::vector<Eigen::Vector3d> pcd;
