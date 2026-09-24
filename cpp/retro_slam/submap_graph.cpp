@@ -69,8 +69,6 @@ Result SubmapGraph::RegisterSubmaps(const int source_id,
     target_map.AddPoints(target_points);
     const Sophus::SE3d pose = registration_pipeline.AlignPointsToMap(
         source_points, target_map, Sophus::SE3d(initial_guess), icp_threshold, kernel_scale_factor);
-    const Eigen::Matrix6d hessian =
-        registration_pipeline.GetHessian(source_points, target_map, pose, icp_threshold);
-    return {pose.matrix(), hessian, registration_pipeline.fitness_};
+    return {pose.matrix(), registration_pipeline.hessian_, registration_pipeline.fitness_};
 }
 }  // namespace retro_slam

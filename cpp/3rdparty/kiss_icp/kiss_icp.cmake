@@ -20,6 +20,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 include(FetchContent)
-FetchContent_Declare(kiss-icp GIT_REPOSITORY https://github.com/saurabh1002/kiss-icp.git GIT_TAG main SOURCE_SUBDIR
+FetchContent_Declare(kiss-icp GIT_REPOSITORY https://github.com/saurabh1002/kiss-icp.git GIT_TAG icp_hessian SOURCE_SUBDIR
                                                                                                       cpp/kiss_icp)
 FetchContent_MakeAvailable(kiss-icp)
